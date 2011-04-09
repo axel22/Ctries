@@ -1,0 +1,36 @@
+  def benchLabel = "bench"
+  
+  def benchCompileDirectoryName = benchLabel
+  
+  def benchCompilePath = outputPath / benchCompileDirectoryName
+  
+  def benchClasses = (benchCompilePath ##) ** "*.class"
+  
+  def benchPath = benchClasses
+  
+  def benchJarName = artifactBaseName + "-bench" + ".jar"
+  
+  def benchJarPath = outputPath / benchJarName
+  
+  def benchSourcePath = sourcePath / benchLabel
+  
+  def benchSourceScala = benchSourcePath / scalaDirectoryName
+  
+  class BenchCompileConfig extends BaseCompileConfig {
+    def baseCompileOptions = testCompileOptions
+    def label = benchLabel
+    def sourceRoots = benchSourceScala
+    def sources = (benchSourceScala ##) ** "*.scala"
+    def outputDirectory = benchCompilePath
+    def classpath = testClasspath
+    def analysisPath = outputPath / "bench-analysis"
+    def javaOptions = testJavaCompileOptions.map(_.asString)
+    def fingerprints = Fingerprints(Nil, Nil)
+  }
+  
+  lazy val packageBench = packageTask(benchPath, benchJarPath, packageOptions).dependsOn(compileBench)
+  
+  lazy val compileBench = task {
+    (new CompileConditional(new BenchCompileConfig, buildCompiler)).run
+  } dependsOn (`package`)
+  

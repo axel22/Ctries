@@ -1,0 +1,36 @@
+#!/usr/bin/perl
+
+#
+# Reads lines with numbers from the first file, computes the average and writes it to the second file.
+#
+
+
+open(HANDLE, $ARGV[0]);
+open(PLOT,">>$ARGV[1]") || die("Cannot Open File"); 
+
+#printf("filename: $ARGV[0]\n");
+
+while ($line = <HANDLE>) {
+#    printf("line: $line\n");
+    $sum = 0;
+    $num = 0;
+    @rawdata = split(' ', $line);
+#    printf("data: @rawdata\n");
+    foreach (@rawdata) {
+	if ($num > 1) {
+	    $sum = $sum + $_;
+	}
+	$num = $num + 1;
+    }
+#    printf("$num, $sum\n");
+    $avg = 1.0 * $sum / ($num - 2);
+    
+    print PLOT " $avg ";
+}
+print PLOT "\n";
+
+close(HANDLE);
+close(PLOT);
+
+
+
