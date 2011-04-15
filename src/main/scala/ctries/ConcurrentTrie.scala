@@ -22,7 +22,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
     m match {
       case cn: CNode[K, V] => // 2) multiple values at this node
         // 2) calculate the position in the bitmap
-        val idx = (hc >> lev) & 0x1f
+        val idx = (hc >>> lev) & 0x1f
         val bmp = cn.bitmap
         val flag = 1 << idx
         val mask = flag - 1
@@ -69,8 +69,8 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
   }
   
   private def cnode(x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int): CNode[K, V] = if (lev < 35) {
-    val xidx = (xhc >> lev) & 0x1f
-    val yidx = (yhc >> lev) & 0x1f
+    val xidx = (xhc >>> lev) & 0x1f
+    val yidx = (yhc >>> lev) & 0x1f
     val bmp = (1 << xidx) | (1 << yidx)
     if (xidx == yidx) {
       val subinode = new INode[K, V](updater)
@@ -92,7 +92,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
   final def lookup(k: K, hc: Int, lev: Int, m: AnyRef, parent: INode[K, V]): AnyRef = {
     m match {
       case cn: CNode[K, V] => // 2) a multinode
-        val idx = (hc >> lev) & 0x1f
+        val idx = (hc >>> lev) & 0x1f
         val bmp = cn.bitmap
         val flag = 1 << idx
         if ((bmp & flag) == 0) null // 2a) bitmap shows no binding
@@ -123,7 +123,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           if (CAS(sn, null)) Some(sn.v) else null
         } else None
       case cn: CNode[K, V] => // 2) a multinode
-        val idx = (hc >> lev) & 0x1f
+        val idx = (hc >>> lev) & 0x1f
         val flag = 1 << idx
         val bmp = cn.bitmap
         if ((bmp & flag) == 0) None // 2a) binding not found
@@ -194,7 +194,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           parentm match {
             case cn: CNode[K, V] =>
               // try to reach sn once more from the parent
-              val idx = (hc >> (lev - 5)) & 0x1f
+              val idx = (hc >>> (lev - 5)) & 0x1f
               val flag = 1 << idx
               val bmp = cn.bitmap
               val pos = Integer.bitCount(bmp & (flag - 1))
