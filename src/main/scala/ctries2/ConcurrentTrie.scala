@@ -35,8 +35,8 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           cn.array(pos) match {
             case in: INode[K, V] => in.insert(k, v, hc, lev + 5, this)
             case sn: SNode[K, V] if !sn.tomb =>
-              if (sn.k != k) CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))
-              else CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))
+              if (sn.hc == hc && sn.k == k) CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))
+              else CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))
             case sn: SNode[K, V] if sn.tomb => // fix!
               if (parent ne null) clean(parent)
               false
@@ -73,15 +73,14 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           val sub = cn.array(pos)
           sub match {
             case in: INode[K, V] => in.lookup(k, hc, lev + 5, this)
-            case sn: SNode[K, V] if !sn.tomb => // 2) singleton node
+            case sn: SNode[K, V] => // 2) singleton node
+              assert(!sn.tomb)
               if (sn.hc == hc && sn.k == k) sn.v.asInstanceOf[AnyRef]
               else null
-            case sn: SNode[K, V] if sn.tomb => // fix!
-              if (parent ne null) clean(parent)
-              RESTART
           }
         }
       case sn: SNode[K, V] => // 3) non-live node
+        assert(sn.tomb)
         clean(parent)
         RESTART
       case null  => // 4) a null-i-node
@@ -93,7 +92,39 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
   final def remove(k: K, hc: Int, lev: Int, parent: INode[K, V]): Option[V] = {
     val m = /*READ*/mainnode
     
-    None
+    m match {
+      case cn: CNode[K, V] =>
+        val idx = (hc >>> lev) & 0x1f
+        val bmp = cn.bitmap
+        val flag = 1 << idx
+        if ((bmp & flag) == 0) None
+        else {
+          val pos = Integer.bitCount(bmp & (flag - 1))
+          val sub = cn.array(pos)
+          val res = sub match {
+            case in: INode[K, V] => in.remove(k, hc, lev + 5, this)
+            case sn: SNode[K, V] =>
+              assert(!sn.tomb)
+              if (sn.hc == hc && sn.k == k) {
+                if (CAS(cn, cn.removedAt(pos, flag))) Some(sn.v) else null
+              } else None
+          }
+          
+          if (res == None || (res eq null)) res
+          else {
+            // TODO mark-compress
+
+            res
+          }
+        }
+      case sn: SNode[K, V] =>
+        assert(sn.tomb)
+        clean(parent)
+        null
+      case null =>
+        if (parent ne null) clean(parent)
+        null
+    }
   }
   
   private def clean(parent: INode[K, V]) {
@@ -134,6 +165,14 @@ final class CNode[K, V](bmp: Int, a: Array[BasicNode]) extends CNodeBase[K, V] {
     Array.copy(array, 0, narr, 0, len)
     narr(pos) = nn
     new CNode(bitmap, narr)
+  }
+  
+  final def removedAt(pos: Int, flag: Int) = {
+    val len = array.length
+    val narr = new Array[BasicNode](len)
+    Array.copy(array, 0, narr, 0, pos)
+    Array.copy(array, pos + 1, narr, pos + 1, len - pos - 1)
+    new CNode(bitmap ^ flag, narr)
   }
   
   private def resurrect(inode: INode[K, V], inodemain: AnyRef) = inodemain match {
@@ -193,6 +232,51 @@ final class CNode[K, V](bmp: Int, a: Array[BasicNode]) extends CNodeBase[K, V] {
         Array.copy(tmparray, 0, narr, 0, nsz)
         new CNode(nbmp, narr)
       } else null
+    }
+  }
+  
+  // - returns a tombed singleton iff 
+  //   there is only a single singleton below, tombed or live
+  // - returns null iff there are no non-null i-nodes below
+  // - otherwise returns a copy of this node such that
+  //   all null-i-nodes present when the op began are removed
+  final def toTombedCompressed(): BasicNode = {
+    val arr = array
+    val len = arr.length
+    val tmparr = new Array[BasicNode](len)
+    var lastsn: SNode[K, V] = null
+    var total = 0
+    var i = 0
+    var firstpos = -1
+    var bmp = bitmap
+    var nbmp = 0
+    while (i < len) {
+      val sub = arr(i)
+      val lsb = bmp & (-bmp)
+      bmp ^= lsb
+      nbmp |= lsb
+      if (sub ne null) {
+        tmparr(total) = sub
+        total += 1
+        sub match {
+          case sn: SNode[K, V] => lastsn = sn
+          case in: INode[K, V] =>
+            val m = /*READ*/in.mainnode
+            m match {
+              case sn: SNode[K, V] => lastsn = sn
+              case _ => // do nothing
+            }
+        }
+      }
+      i += 1
+    }
+    
+    if (total == 0) null
+    else if (total == 1 && lastsn != null) lastsn.copyTombed
+    else {
+      val narr = new Array[BasicNode](total)
+      Array.copy(tmparr, 0, narr, 0, total)
+      new CNode(nbmp, narr)
     }
   }
   
