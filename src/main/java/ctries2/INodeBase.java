@@ -4,7 +4,7 @@ package ctries2;
 
 
 
-public abstract class INodeBase {
+public abstract class INodeBase implements BasicNode {
     
     public static final Object ROOTNULL = new Object();
     

@@ -35,11 +35,11 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           }
         } else {
           val len = cn.array.length
-          val narr = new Array[INode[K, V]](len + 1)
+          val narr = new Array[BasicNode](len + 1)
           val ncnode = new CNode[K, V](bmp | flag, narr)
-          Array.copy(cn.array, 0, arr, 0, pos)
-          arr(pos) = new SNode(k, v, hc, false)
-          Array.copy(cn.array, pos, arr, pos + 1, len - pos)
+          Array.copy(cn.array, 0, narr, 0, pos)
+          narr(pos) = new SNode(k, v, hc, false)
+          Array.copy(cn.array, pos, narr, pos + 1, len - pos)
           CAS(cn, ncnode)
         }
       case null => // 2) a null-i-node, fix and retry
@@ -62,12 +62,17 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
         if ((bmp & flag) == 0) null // 1a) bitmap shows no binding
         else { // 1b) bitmap contains a value - descend
           val pos = Integer.bitCount(bmp & (flag - 1))
-          val subinode = cn.array(pos)
-          subinode.lookup(k, hc, lev + 5, this)
+          val sub = cn.array(pos)
+          sub match {
+            case in: INode[K, V] => in.lookup(k, hc, lev + 5, this)
+            case sn: SNode[K, V] if !sn.tomb => // 2) singleton node
+              if (sn.hc == hc && sn.k == k) sn.v.asInstanceOf[AnyRef]
+              else null
+            case sn: SNode[K, V] if sn.tomb => // fix!
+              if (parent ne null) clean(parent)
+              RESTART
+          }
         }
-      case sn: SNode[K, V] if !sn.tomb => // 2) singleton node
-        if (sn.hc == hc && sn.k == k) sn.v.asInstanceOf[AnyRef]
-        else null
       case sn: SNode[K, V] => // 3) non-live node
         clean(parent)
         RESTART
@@ -87,7 +92,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
     }
   }
   
-  private[ctries2] def string(lev: Int) = "%sINode -> %s".format("  " * lev, mainnode match {
+  def string(lev: Int) = "%sINode -> %s".format("  " * lev, mainnode match {
     case null => "<null>"
     case sn: SNode[_, _] => "SNode(%s, %s, %d, %c)".format(sn.k, sn.v, sn.hc, if (sn.tomb) '!' else '_')
     case cn: CNode[_, _] => cn.string(lev)
@@ -97,20 +102,21 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
 }
 
 
-final class SNode[K, V](final val k: K, final val v: V, final val hc: Int, final val tomb: Boolean) {
+final class SNode[K, V](final val k: K, final val v: V, final val hc: Int, final val tomb: Boolean) extends BasicNode {
   final def copy = new SNode(k, v, hc, tomb)
   final def copyTombed = new SNode(k, v, hc, true)
   final def copyUntombed = new SNode(k, v, hc, false)
+  final def string(lev: Int) = ("  " * lev) + "SNode(%s, %s, %d, %c)".format(k, v, hc, tomb)
 }
 
 
-final class CNode[K, V](bmp: Int, a: Array[AnyRef]) extends CNodeBase[K, V] {
+final class CNode[K, V](bmp: Int, a: Array[BasicNode]) extends CNodeBase[K, V] {
   bitmap = bmp
   array = a
   
-  final def updatedAt(pos: Int, nn: AnyRef) = {
+  final def updatedAt(pos: Int, nn: BasicNode) = {
     val len = array.length
-    val narr = new Array[AnyRef](len)
+    val narr = new Array[BasicNode](len)
     Array.copy(array, 0, narr, 0, len)
     narr(pos) = nn
     new CNode(bitmap, narr)
@@ -124,13 +130,27 @@ final class CNode[K, V](bmp: Int, a: Array[AnyRef]) extends CNodeBase[K, V] {
     case _ => inode
   }
   
-  // - will remove at least the null-inodes and tomb-inodes present at the beginning
-  //   and possibly some that appear during the compression
-  // - if it detects a singleton
+  private def extractSNode(n: BasicNode) = n match {
+    case sn: SNode[K, V] => sn.copyUntombed
+    case in: INode[K, V] => in.mainnode match {
+      case sn: SNode[K, V] => sn.copyUntombed
+    }
+  }
+  
+  private def isTombed(bn: BasicNode) = bn match {
+    case in: INode[K, V] =>
+      val m = /*READ*/in.mainnode
+      m match {
+        case sn: SNode[K, V] if sn.tomb => true
+        case _ => false
+      }
+    case _ => false
+  }
+  
   final def toCompressed = {
     var bmp = bitmap
     val maxsubnodes = Integer.bitCount(bmp) // !!!this ensures lock-freedom!!!
-    if (maxsubnodes == 1 && array(0).isTombed) asSNode(array(0).mainnode).copyUntombed
+    if (maxsubnodes == 1 && isTombed(array(0))) extractSNode(array(0)).copyUntombed
     else {
       var nbmp = 0
       var i = 0
@@ -139,19 +159,23 @@ final class CNode[K, V](bmp: Int, a: Array[AnyRef]) extends CNodeBase[K, V] {
       val tmparray = new Array[INode[K, V]](arr.length)
       while (bmp != 0) { // construct new bitmap
         val lsb = bmp & (-bmp)
-        val inode = arr(i)
-        val inodemain = inode.mainnode
-        if (inodemain ne null) {
-          nbmp |= lsb
-          tmparray(nsz) = resurrect(inode, inodemain)
-          nsz += 1
+        val sub = arr(i)
+        sub match {
+          case in: INode[K, V] =>
+            val inodemain = in.mainnode
+            if (inodemain ne null) {
+              nbmp |= lsb
+              tmparray(nsz) = resurrect(in, inodemain)
+              nsz += 1
+            }
+          case sn =>
         }
         bmp ^= lsb
         i += 1
       }
       
       if (nsz > 0) {
-        val narr = new Array[INode[K, V]](nsz)
+        val narr = new Array[BasicNode](nsz)
         Array.copy(tmparray, 0, narr, 0, nsz)
         new CNode(nbmp, narr)
       } else null
@@ -166,22 +190,22 @@ object CNode {
   def singular[K, V](k: K, v: V, hc: Int, lev: Int) = {
     val sn = new SNode(k, v, hc, false)
     val flag = 1 << ((hc >>> lev) & 0x1f)
-    val arr = new Array[INode[K, V]](1)
+    val arr = new Array[BasicNode](1)
     arr(0) = sn
     new CNode(flag, arr)
   }
   
-  private def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int): CNode[K, V] = if (lev < 35) {
+  def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int): CNode[K, V] = if (lev < 35) {
     val xidx = (xhc >>> lev) & 0x1f
     val yidx = (yhc >>> lev) & 0x1f
     val bmp = (1 << xidx) | (1 << yidx)
     if (xidx == yidx) {
-      val subinode = new INode[K, V](updater)
-      subinode.mainnode = cnode(x, xhc, y, yhc, lev + 5)
+      val subinode = new INode[K, V](ConcurrentTrie.inodeupdater)
+      subinode.mainnode = dual(x, xhc, y, yhc, lev + 5)
       new CNode(bmp, Array(subinode))
     } else {
-      if (xidx < yidx) new CNode(bmp, Array(s_inode(x), s_inode(y)))
-      else new CNode(bmp, Array(s_inode(y), s_inode(x)))
+      if (xidx < yidx) new CNode(bmp, Array(x, y))
+      else new CNode(bmp, Array(y, x))
     }
   } else sys.error("list nodes not supported yet")
 }
@@ -224,8 +248,8 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     if (r eq null) null
     else {
       val res = r.lookup(k, hc, 0, null)
-      if (res eq RESTART) lookuphc(k, hc)
-      else if (res eq ROOTNULL) {
+      if (res eq INodeBase.RESTART) lookuphc(k, hc)
+      else if (res eq INodeBase.ROOTNULL) {
         rootupdater.compareAndSet(this, r, null)
         lookuphc(k, hc)
       } else res
