@@ -14,6 +14,12 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
   
   @inline final def CAS(old: AnyRef, n: AnyRef) = updater.compareAndSet(this, old, n)
   
+  private def inode(cn: CNode[K, V]) = {
+    val nin = new INode[K, V](updater)
+    /*WRITE*/nin.mainnode = cn
+    nin
+  }
+  
   final def insert(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V]): Boolean = {
     val m = /*READ*/mainnode
     
@@ -28,7 +34,9 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           // 1a) insert below
           cn.array(pos) match {
             case in: INode[K, V] => in.insert(k, v, hc, lev + 5, this)
-            case sn: SNode[K, V] if !sn.tomb => CAS(cn, cn.updatedAt(pos, CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5)))
+            case sn: SNode[K, V] if !sn.tomb =>
+              if (sn.k != k) CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))
+              else CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))
             case sn: SNode[K, V] if sn.tomb => // fix!
               if (parent ne null) clean(parent)
               false
@@ -76,12 +84,16 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
       case sn: SNode[K, V] => // 3) non-live node
         clean(parent)
         RESTART
-      case null if parent ne null => // 4) a null-i-node
-        clean(parent)
+      case null  => // 4) a null-i-node
+        if (parent ne null) clean(parent)
         RESTART
-      case null => // 5) a null-i-node below the root
-        ROOTNULL
     }
+  }
+  
+  final def remove(k: K, hc: Int, lev: Int, parent: INode[K, V]): Option[V] = {
+    val m = /*READ*/mainnode
+    
+    None
   }
   
   private def clean(parent: INode[K, V]) {
@@ -91,6 +103,8 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
       case _ =>
     }
   }
+  
+  final def isNullInode = mainnode eq null
   
   def string(lev: Int) = "%sINode -> %s".format("  " * lev, mainnode match {
     case null => "<null>"
@@ -106,7 +120,7 @@ final class SNode[K, V](final val k: K, final val v: V, final val hc: Int, final
   final def copy = new SNode(k, v, hc, tomb)
   final def copyTombed = new SNode(k, v, hc, true)
   final def copyUntombed = new SNode(k, v, hc, false)
-  final def string(lev: Int) = ("  " * lev) + "SNode(%s, %s, %d, %c)".format(k, v, hc, tomb)
+  final def string(lev: Int) = ("  " * lev) + "SNode(%s, %s, %d, %c)".format(k, v, hc, if (tomb) '!' else '_')
 }
 
 
@@ -207,7 +221,7 @@ object CNode {
       if (xidx < yidx) new CNode(bmp, Array(x, y))
       else new CNode(bmp, Array(y, x))
     }
-  } else sys.error("list nodes not supported yet")
+  } else sys.error("list nodes not supported yet, lev=%d; %s, %s".format(lev, x.string(lev), y.string(lev)))
 }
 
 
@@ -231,11 +245,16 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     val r = /*READ*/root
     
     // 0) check if the root is a null reference - if so, allocate a new root
-    if (r eq null) {
+    if ((r eq null) || r.isNullInode) {
       val nroot = new INode[K, V](ConcurrentTrie.inodeupdater)
       nroot.mainnode = CNode.singular(k, v, hc, 0)
       if (!rootupdater.compareAndSet(this, r, nroot)) inserthc(k, hc, v)
     } else if (!r.insert(k, v, hc, 0, null)) inserthc(k, hc, v)
+  }
+  
+  final def lookupOpt(k: K): Option[V] = {
+    val hc = computeHash(k)
+    Option(lookuphc(k, hc)).asInstanceOf[Option[V]]
   }
   
   final def lookup(k: K): V = {
@@ -248,19 +267,33 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     if (r eq null) null
     else {
       val res = r.lookup(k, hc, 0, null)
-      if (res eq INodeBase.RESTART) lookuphc(k, hc)
-      else if (res eq INodeBase.ROOTNULL) {
-        rootupdater.compareAndSet(this, r, null)
+      if (res ne INodeBase.RESTART) res
+      else {
+        if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
         lookuphc(k, hc)
-      } else res
+      }
     }
   }
   
   final def remove(k: K): Option[V] = {
-    None // TODO
+    val hc = computeHash(k)
+    removehc(k, hc)
   }
   
-  private[ctries2] def string = root.string(0)
+  private def removehc(k: K, hc: Int): Option[V] = {
+    val r = /*READ*/root
+    if (r eq null) None
+    else {
+      val res = r.remove(k, hc, 0, null)
+      if (res ne null) res
+      else {
+        if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
+        removehc(k, hc)
+      }
+    }
+  }
+  
+  private[ctries2] def string = if (root != null) root.string(0) else "<null>"
   
 }
 
