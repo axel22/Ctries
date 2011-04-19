@@ -156,7 +156,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
             
             if (parent ne null) { // never tomb at root
               if (tombCompress() && (parent ne null)) contractParent(/*READ*/mainnode) // note: definitely non-live
-            }// else clean(this) // clean root
+            } //else clean(this) // clean root
             
             res
           }
