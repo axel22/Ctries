@@ -50,11 +50,12 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           Array.copy(cn.array, pos, narr, pos + 1, len - pos)
           CAS(cn, ncnode)
         }
+      case sn: SNode[K, V] if sn.tomb =>
+        assert(sn.tomb)
+        clean(parent)
+        false
       case null => // 2) a null-i-node, fix and retry
         if (parent ne null) clean(parent)
-        false
-      case sn: SNode[K, V] if sn.tomb =>
-        clean(parent)
         false
     }
   }
@@ -106,14 +107,57 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
             case sn: SNode[K, V] =>
               assert(!sn.tomb)
               if (sn.hc == hc && sn.k == k) {
-                if (CAS(cn, cn.removedAt(pos, flag))) Some(sn.v) else null
+                var ncn: CNode[K, V] = null
+                if (cn.array.length > 1) ncn = cn.removedAt(pos, flag)
+                if (CAS(cn, ncn)) Some(sn.v) else null
               } else None
           }
           
           if (res == None || (res eq null)) res
           else {
-            // TODO mark-compress
-
+            // tomb-compress
+            @tailrec def tombCompress(): Boolean = {
+              val m = /*READ*/mainnode
+              m match {
+                case cn: CNode[K, V] =>
+                  val tcn = cn.toTombedCompressed
+                  if (tcn eq cn) false // we're done, no further compression needed
+                  else if (CAS(cn, tcn)) tcn match {
+                    case sn: SNode[K, V] => true // parent contraction needed
+                    case null => true // parent contraction needed
+                    case _ => false // nothing to contract, we're done
+                  } else tombCompress()
+                case _ => false // we're done, no further compression needed
+              }
+            }
+            
+            def contractParent(nonlive: AnyRef) {
+              val pm = /*READ*/parent.mainnode
+              pm match {
+                case cn: CNode[K, V] =>
+                  val idx = (hc >>> (lev - 5)) & 0x1f
+                  val bmp = cn.bitmap
+                  val flag = 1 << idx
+                  if ((bmp & flag) == 0) {} // somebody already removed this i-node, we're done
+                  else {
+                    val pos = Integer.bitCount(bmp & (flag - 1))
+                    val sub = cn.array(pos)
+                    sub match {
+                      case x if x eq this => nonlive match {
+                        case null => if (!parent.CAS(cn, cn.removedAt(pos, flag))) contractParent(nonlive)
+                        case sn: SNode[K, V] => if (!parent.CAS(cn, cn.updatedAt(pos, sn.copyUntombed))) contractParent(nonlive)
+                      }
+                      case _ => // somebody already removed this i-node, we're done
+                    }
+                  }
+                case _ => // parent is no longer a cnode, we're done
+              }
+            }
+            
+            if (parent ne null) { // never tomb at root
+              if (tombCompress() && (parent ne null)) contractParent(/*READ*/mainnode) // note: definitely non-live
+            }// else clean(this) // clean root
+            
             res
           }
         }
@@ -127,10 +171,10 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
     }
   }
   
-  private def clean(parent: INode[K, V]) {
-    val parentm = parent.mainnode
-    parentm match {
-      case cn: CNode[K, V] => parent.CAS(cn, cn.toCompressed)
+  private def clean(nd: INode[K, V]) {
+    val m = nd.mainnode
+    m match {
+      case cn: CNode[K, V] => nd.CAS(cn, cn.toCompressed)
       case _ =>
     }
   }
@@ -155,38 +199,36 @@ final class SNode[K, V](final val k: K, final val v: V, final val hc: Int, final
 }
 
 
-final class CNode[K, V](bmp: Int, a: Array[BasicNode]) extends CNodeBase[K, V] {
-  bitmap = bmp
-  array = a
+final class CNode[K, V](bmp0: Int, a0: Array[BasicNode]) extends CNodeBase[K, V] {
+  bitmap = bmp0
+  array = a0
   
   final def updatedAt(pos: Int, nn: BasicNode) = {
     val len = array.length
     val narr = new Array[BasicNode](len)
     Array.copy(array, 0, narr, 0, len)
     narr(pos) = nn
-    new CNode(bitmap, narr)
+    new CNode[K, V](bitmap, narr)
   }
   
   final def removedAt(pos: Int, flag: Int) = {
-    val len = array.length
-    val narr = new Array[BasicNode](len)
-    Array.copy(array, 0, narr, 0, pos)
-    Array.copy(array, pos + 1, narr, pos + 1, len - pos - 1)
-    new CNode(bitmap ^ flag, narr)
+    val arr = array
+    val len = arr.length
+    val narr = new Array[BasicNode](len - 1)
+    Array.copy(arr, 0, narr, 0, pos)
+    Array.copy(arr, pos + 1, narr, pos, len - pos - 1)
+    new CNode[K, V](bitmap ^ flag, narr)
   }
   
   private def resurrect(inode: INode[K, V], inodemain: AnyRef) = inodemain match {
-    case sn: SNode[_, _] if sn.tomb =>
-      val newinode = new INode[K, V](ConcurrentTrie.inodeupdater)
-      newinode.mainnode = sn.copyUntombed
-      newinode
+    case sn: SNode[_, _] if sn.tomb => sn.copyUntombed
     case _ => inode
   }
   
   private def extractSNode(n: BasicNode) = n match {
-    case sn: SNode[K, V] => sn.copyUntombed
+    case sn: SNode[K, V] => sn
     case in: INode[K, V] => in.mainnode match {
-      case sn: SNode[K, V] => sn.copyUntombed
+      case sn: SNode[K, V] => sn
     }
   }
   
@@ -200,16 +242,22 @@ final class CNode[K, V](bmp: Int, a: Array[BasicNode]) extends CNodeBase[K, V] {
     case _ => false
   }
   
+  // - if the branching factor is 1 for this CNode, and the child
+  //   is an SNode (live or tombed), returns its tombed version
+  // - otherwise, if there is at least one non-null node below,
+  //   returns the version of this node with at least some null-inodes
+  //   removed (those existing when the op began)
+  // - if there are only null-i-nodes below, returns null
   final def toCompressed = {
     var bmp = bitmap
     val maxsubnodes = Integer.bitCount(bmp) // !!!this ensures lock-freedom!!!
-    if (maxsubnodes == 1 && isTombed(array(0))) extractSNode(array(0)).copyUntombed
+    if (maxsubnodes == 1 && isTombed(array(0))) extractSNode(array(0)).copyTombed
     else {
       var nbmp = 0
       var i = 0
       val arr = array
       var nsz = 0
-      val tmparray = new Array[INode[K, V]](arr.length)
+      val tmparray = new Array[BasicNode](arr.length)
       while (bmp != 0) { // construct new bitmap
         val lsb = bmp & (-bmp)
         val sub = arr(i)
@@ -221,7 +269,11 @@ final class CNode[K, V](bmp: Int, a: Array[BasicNode]) extends CNodeBase[K, V] {
               tmparray(nsz) = resurrect(in, inodemain)
               nsz += 1
             }
-          case sn =>
+          case sn: SNode[K, V] =>
+            assert(!sn.tomb)
+            nbmp |= lsb
+            tmparray(nsz) = sn
+            nsz += 1
         }
         bmp ^= lsb
         i += 1
@@ -240,14 +292,16 @@ final class CNode[K, V](bmp: Int, a: Array[BasicNode]) extends CNodeBase[K, V] {
   // - returns null iff there are no non-null i-nodes below
   // - otherwise returns a copy of this node such that
   //   all null-i-nodes present when the op began are removed
+  // - or this node if there are no null i-nodes below
+  //   but more than a single singleton
   final def toTombedCompressed(): BasicNode = {
     val arr = array
     val len = arr.length
     val tmparr = new Array[BasicNode](len)
     var lastsn: SNode[K, V] = null
     var total = 0
+    var nulls = 0
     var i = 0
-    var firstpos = -1
     var bmp = bitmap
     var nbmp = 0
     while (i < len) {
@@ -267,17 +321,17 @@ final class CNode[K, V](bmp: Int, a: Array[BasicNode]) extends CNodeBase[K, V] {
               case _ => // do nothing
             }
         }
-      }
+      } else nulls += 1
       i += 1
     }
     
     if (total == 0) null
     else if (total == 1 && lastsn != null) lastsn.copyTombed
-    else {
+    else if (nulls > 0) {
       val narr = new Array[BasicNode](total)
       Array.copy(tmparr, 0, narr, 0, total)
       new CNode(nbmp, narr)
-    }
+    } else this
   }
   
   private[ctries2] def string(lev: Int): String = "CNode %x\n%s".format(bitmap, array.map(_.string(lev + 1)).mkString("\n"))

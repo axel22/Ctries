@@ -86,21 +86,21 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until sz) assert(ct.lookupOpt(new Wrap(i)) == Some(i), (i, ct.lookupOpt(new Wrap(i))))
     }
     
-    // "be inserted into and removed from" in {
-    //   val sz = 148
-    //   val ct = new ConcurrentTrie[Int, Int]
+    "be inserted into and removed from" in {
+      val sz = 148
+      val ct = new ConcurrentTrie[Int, Int]
       
-    //   for (i <- 0 until sz) ct.insert(i, i)
+      for (i <- 0 until sz) ct.insert(i, i)
       
-    //   for (i <- (0 until sz).reverse) {
-    //     val removedvalue = ct.remove(i)
-    //     assert(removedvalue == Some(i), (i, removedvalue, ct.string))
-    //     assert(ct.lookupOpt(i) == None, i)
-    //     for (j <- 0 until i) assert(ct.lookupOpt(j) == Some(j), (j, ct.lookupOpt(j)))
-    //   }
+      for (i <- (0 until sz).reverse) {
+        val removedvalue = ct.remove(i)
+        assert(removedvalue == Some(i), (i, removedvalue, ct.string))
+        assert(ct.lookupOpt(i) == None, i)
+        for (j <- 0 until i) assert(ct.lookupOpt(j) == Some(j), (j, ct.lookupOpt(j)))
+      }
       
-    //   println(ct.string)
-    // }
+      println(ct.string)
+    }
     
     // "be inserted many values and removed from" in {
     //   val sz = 14800
