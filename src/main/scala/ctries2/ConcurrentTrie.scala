@@ -122,7 +122,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
               val m = /*READ*/mainnode
               m match {
                 case cn: CNode[K, V] =>
-                  val tcn = cn.toTombedCompressed
+                  val tcn = cn.toWeakTombedCompressed
                   if (tcn eq cn) false // we're done, no further compression needed
                   else if (CAS(cn, tcn)) tcn match {
                     case sn: SNode[K, V] => true // parent contraction needed
@@ -133,7 +133,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
               }
             }
             
-            def contractParent(nonlive: AnyRef) {
+            @tailrec def contractParent(nonlive: AnyRef) {
               val pm = /*READ*/parent.mainnode
               pm match {
                 case cn: CNode[K, V] =>
@@ -144,12 +144,9 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
                   else {
                     val pos = Integer.bitCount(bmp & (flag - 1))
                     val sub = cn.array(pos)
-                    sub match {
-                      case x if x eq this => nonlive match {
-                        case null => if (!parent.CAS(cn, cn.removedAt(pos, flag))) contractParent(nonlive)
-                        case sn: SNode[K, V] => if (!parent.CAS(cn, cn.updatedAt(pos, sn.copyUntombed))) contractParent(nonlive)
-                      }
-                      case _ => // somebody already removed this i-node, we're done
+                    if (sub eq this)  nonlive match {
+                      case null => if (!parent.CAS(cn, cn.removedAt(pos, flag))) contractParent(nonlive)
+                      case sn: SNode[K, V] => if (!parent.CAS(cn, cn.updatedAt(pos, sn.copyUntombed))) contractParent(nonlive)
                     }
                   }
                 case _ => // parent is no longer a cnode, we're done
@@ -157,7 +154,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
             }
             
             if (parent ne null) { // never tomb at root
-              if (tombCompress() && (parent ne null)) contractParent(/*READ*/mainnode) // note: definitely non-live
+              if (tombCompress()) contractParent(/*READ*/mainnode) // note: this inode is non-live in the 'if' body
             } //else clean(this) // clean root
             
             res
@@ -332,6 +329,52 @@ final class CNode[K, V](bmp0: Int, a0: Array[BasicNode]) extends CNodeBase[K, V]
     else if (nulls > 0) {
       val narr = new Array[BasicNode](total)
       Array.copy(tmparr, 0, narr, 0, total)
+      new CNode(nbmp, narr)
+    } else this
+  }
+  
+  // - returns a tombed singleton iff 
+  //   there is only a single singleton below, tombed or live
+  // - returns null iff there are no non-null i-nodes below
+  // - returns this node if there is more than a single branch
+  //   (even if there are null-i-nodes below - they will not be removed)
+  // - otherwise returns a copy of this node such that
+  //   all null-i-nodes present when the op began are removed
+  final def toWeakTombedCompressed(): BasicNode = {
+    val arr = array
+    val len = arr.length
+    var lastsub: BasicNode = null
+    var lastsn: SNode[K, V] = null
+    var nulls = 0
+    var i = 0
+    var bmp = bitmap
+    var nbmp = 0
+    while (i < len) {
+      val sub = arr(i)
+      val lsb = bmp & (-bmp)
+      bmp ^= lsb
+      nbmp |= lsb
+      if (sub ne null) {
+        if (lastsub ne null) return this
+        lastsub = sub
+        sub match {
+          case sn: SNode[K, V] => lastsn = sn
+          case in: INode[K, V] =>
+            val m = /*READ*/in.mainnode
+            m match {
+              case sn: SNode[K, V] => lastsn = sn
+              case _ => // do nothing
+            }
+        }
+      } else nulls += 1
+      i += 1
+    }
+    
+    if (lastsub eq null) null
+    else if (lastsn ne null) lastsn.copyTombed
+    else if (nulls > 0) {
+      val narr = new Array[BasicNode](1)
+      narr(0) = lastsub
       new CNode(nbmp, narr)
     } else this
   }
