@@ -112,6 +112,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
         val removedvalue = ct.remove(i)
         assert(removedvalue == Some(i), (i, removedvalue))
         assert(ct.lookupOpt(i) == None, i)
+        //if (i < 40) println(ct.string)
       }
     }
     

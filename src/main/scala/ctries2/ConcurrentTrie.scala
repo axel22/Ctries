@@ -37,9 +37,9 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
             case sn: SNode[K, V] if !sn.tomb =>
               if (sn.hc == hc && sn.k == k) CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))
               else CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))
-            case sn: SNode[K, V] if sn.tomb => // fix!
-              if (parent ne null) clean(parent)
-              false
+            // case sn: SNode[K, V] if sn.tomb => // fix!
+            //   if (parent ne null) clean(parent)
+            //   false
           }
         } else {
           val len = cn.array.length
@@ -50,7 +50,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           Array.copy(cn.array, pos, narr, pos + 1, len - pos)
           CAS(cn, ncnode)
         }
-      case sn: SNode[K, V] if sn.tomb =>
+      case sn: SNode[K, V] =>
         //assert(sn.tomb)
         clean(parent)
         false
@@ -232,17 +232,24 @@ final class CNode[K, V](bmp0: Int, a0: Array[BasicNode]) extends CNodeBase[K, V]
   }
   
   private def isTombed(bn: BasicNode) = bn match {
-    case in: INode[K, V] =>
-      val m = /*READ*/in.mainnode
-      m match {
-        case sn: SNode[K, V] if sn.tomb => true
-        case _ => false
-      }
+    case in: INode[K, V] => in.mainnode match {
+      case sn: SNode[K, V] if sn.tomb => true
+      case _ => false
+    }
+    case _ => false
+  }
+  
+  private def isSingleton(bn: BasicNode) = bn match {
+    case in: INode[K, V] => in.mainnode match {
+      case sn: SNode[K, V] if sn.tomb => true
+      case _ => false
+    }
+    case sn: SNode[K, V] => true
     case _ => false
   }
   
   // - if the branching factor is 1 for this CNode, and the child
-  //   is an SNode (live or tombed), returns its tombed version
+  //   is a tombed SNode, returns its tombed version
   // - otherwise, if there is at least one non-null node below,
   //   returns the version of this node with at least some null-inodes
   //   removed (those existing when the op began)
@@ -456,8 +463,6 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
       case RestartException =>
         if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
         lookuphc(k, hc)
-      // if (res ne RESTART) res
-      // else res
       // if (res ne RESTART) res
       // else {
       //   if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
