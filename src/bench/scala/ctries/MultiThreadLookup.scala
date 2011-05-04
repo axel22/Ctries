@@ -1,4 +1,4 @@
-package ctries
+
 
 
 
@@ -68,7 +68,7 @@ object MultiLookupSkipList extends Benchmark {
 
 
 object MultiLookupCtrie extends Benchmark {
-  val ct = new ConcurrentTrie[Elem, Elem]
+  val ct = new ctries.ConcurrentTrie[Elem, Elem]
   for (i <- 0 until sz) ct.insert(elems(i), elems(i))
   
   def run() {
@@ -81,7 +81,7 @@ object MultiLookupCtrie extends Benchmark {
     for (i <- ins) i.join()
   }
   
-  class Looker(ct: ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+  class Looker(ct: ctries.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
     override def run() {
       var i = n * step
       val until = (n + 1) * step
@@ -95,4 +95,32 @@ object MultiLookupCtrie extends Benchmark {
   }
 }
 
+
+object MultiLookupCtrie2 extends Benchmark {
+  val ct = new ctries2.ConcurrentTrie[Elem, Elem]
+  for (i <- 0 until sz) ct.insert(elems(i), elems(i))
+  
+  def run() {
+    val p = par.get
+    val step = sz / p
+    
+    val ins = for (i <- 0 until p) yield new Looker(ct, i, step)
+    
+    for (i <- ins) i.start()
+    for (i <- ins) i.join()
+  }
+  
+  class Looker(ct: ctries2.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+    override def run() {
+      var i = n * step
+      val until = (n + 1) * step
+      val e = elems
+      
+      while (i < until) {
+        ct.lookup(e(i))
+        i += 1
+      }
+    }
+  }
+}
 
