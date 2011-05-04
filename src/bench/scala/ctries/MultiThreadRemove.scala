@@ -6,7 +6,7 @@ import Global._
 import scala.testing.Benchmark
 
 
-// TODO uncomment setUp
+// uncomment setUp
 object MultiRemoveCHM extends Benchmark {
   import java.util.concurrent.ConcurrentHashMap
   var chm = new ConcurrentHashMap[Elem, Elem]
@@ -81,10 +81,10 @@ object MultiRemoveSkipList extends Benchmark {
 
 
 object MultiRemoveCtrie extends Benchmark {
-  var ct = new ConcurrentTrie[Elem, Elem]
+  var ct = new ctries.ConcurrentTrie[Elem, Elem]
   
   override def setUp {
-    ct = new ConcurrentTrie[Elem, Elem]
+    ct = new ctries.ConcurrentTrie[Elem, Elem]
     for (i <- 0 until sz) ct.insert(elems(i), elems(i))
   }
   
@@ -98,7 +98,7 @@ object MultiRemoveCtrie extends Benchmark {
     for (i <- ins) i.join()
   }
   
-  class Remover(ct: ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+  class Remover(ct: ctries.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
     override def run() {
       var i = n * step
       val until = (n + 1) * step
@@ -111,3 +111,38 @@ object MultiRemoveCtrie extends Benchmark {
     }
   }
 }
+
+
+object MultiRemoveCtrie2 extends Benchmark {
+  var ct = new ctries2.ConcurrentTrie[Elem, Elem]
+  
+  override def setUp {
+    ct = new ctries2.ConcurrentTrie[Elem, Elem]
+    for (i <- 0 until sz) ct.insert(elems(i), elems(i))
+  }
+  
+  def run() {
+    val p = par.get
+    val step = sz / p
+    
+    val ins = for (i <- 0 until p) yield new Remover(ct, i, step)
+    
+    for (i <- ins) i.start()
+    for (i <- ins) i.join()
+  }
+  
+  class Remover(ct: ctries2.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+    override def run() {
+      var i = n * step
+      val until = (n + 1) * step
+      val e = elems
+      
+      while (i < until) {
+        ct.remove(e(i))
+        i += 1
+      }
+    }
+  }
+}
+
+

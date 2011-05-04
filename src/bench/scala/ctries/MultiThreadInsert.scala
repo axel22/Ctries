@@ -67,7 +67,7 @@ object MultiInsertSkipList extends Benchmark {
 
 object MultiInsertCtrie extends Benchmark {
   def run() {
-    val ct = new ConcurrentTrie[Elem, Elem]
+    val ct = new ctries.ConcurrentTrie[Elem, Elem]
     val p = par.get
     val step = sz / p
     
@@ -77,7 +77,34 @@ object MultiInsertCtrie extends Benchmark {
     for (i <- ins) i.join()
   }
   
-  class Inserter(ct: ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+  class Inserter(ct: ctries.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+    override def run() {
+      var i = n * step
+      val until = (n + 1) * step
+      val e = elems
+      
+      while (i < until) {
+        ct.insert(e(i), e(i))
+        i += 1
+      }
+    }
+  }
+}
+
+
+object MultiInsertCtrie2 extends Benchmark {
+  def run() {
+    val ct = new ctries2.ConcurrentTrie[Elem, Elem]
+    val p = par.get
+    val step = sz / p
+    
+    val ins = for (i <- 0 until p) yield new Inserter(ct, i, step)
+    
+    for (i <- ins) i.start()
+    for (i <- ins) i.join()
+  }
+  
+  class Inserter(ct: ctries2.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
     override def run() {
       var i = n * step
       val until = (n + 1) * step

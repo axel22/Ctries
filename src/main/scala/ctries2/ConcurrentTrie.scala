@@ -14,7 +14,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
   
   @inline final def CAS(old: AnyRef, n: AnyRef) = updater.compareAndSet(this, old, n)
   
-  private def inode(cn: CNode[K, V]) = {
+  @inline private def inode(cn: CNode[K, V]) = {
     val nin = new INode[K, V](updater)
     /*WRITE*/nin.mainnode = cn
     nin
@@ -51,7 +51,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           CAS(cn, ncnode)
         }
       case sn: SNode[K, V] if sn.tomb =>
-        assert(sn.tomb)
+        //assert(sn.tomb)
         clean(parent)
         false
       case null => // 2) a null-i-node, fix and retry
@@ -75,18 +75,20 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           sub match {
             case in: INode[K, V] => in.lookup(k, hc, lev + 5, this)
             case sn: SNode[K, V] => // 2) singleton node
-              assert(!sn.tomb)
+              //assert(!sn.tomb)
               if (sn.hc == hc && sn.k == k) sn.v.asInstanceOf[AnyRef]
               else null
           }
         }
       case sn: SNode[K, V] => // 3) non-live node
-        assert(sn.tomb)
+        //assert(sn.tomb)
         clean(parent)
-        RESTART
+        //RESTART
+        throw RestartException
       case null  => // 4) a null-i-node
         if (parent ne null) clean(parent)
-        RESTART
+        //RESTART
+        throw RestartException
     }
   }
   
@@ -105,7 +107,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           val res = sub match {
             case in: INode[K, V] => in.remove(k, hc, lev + 5, this)
             case sn: SNode[K, V] =>
-              assert(!sn.tomb)
+              //assert(!sn.tomb)
               if (sn.hc == hc && sn.k == k) {
                 var ncn: CNode[K, V] = null
                 if (cn.array.length > 1) ncn = cn.removedAt(pos, flag)
@@ -162,7 +164,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
           }
         }
       case sn: SNode[K, V] =>
-        assert(sn.tomb)
+        //assert(sn.tomb)
         clean(parent)
         null
       case null =>
@@ -270,7 +272,7 @@ final class CNode[K, V](bmp0: Int, a0: Array[BasicNode]) extends CNodeBase[K, V]
               nsz += 1
             }
           case sn: SNode[K, V] =>
-            assert(!sn.tomb)
+            //assert(!sn.tomb)
             nbmp |= lsb
             tmparray(nsz) = sn
             nsz += 1
@@ -379,7 +381,8 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     inserthc(k, hc, v)
   }
   
-  @tailrec private def inserthc(k: K, hc: Int, v: V) {
+  //@tailrec
+  private def inserthc(k: K, hc: Int, v: V) {
     val r = /*READ*/root
     
     // 0) check if the root is a null reference - if so, allocate a new root
@@ -400,16 +403,23 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     lookuphc(k, hc).asInstanceOf[V]
   }
   
-  @tailrec private def lookuphc(k: K, hc: Int): AnyRef = {
+  //@tailrec
+  private def lookuphc(k: K, hc: Int): AnyRef = {
     val r = /*READ*/root
     if (r eq null) null
-    else {
-      val res = r.lookup(k, hc, 0, null)
-      if (res ne INodeBase.RESTART) res
-      else {
+    else try {
+      r.lookup(k, hc, 0, null)
+    } catch {
+      case RestartException =>
         if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
         lookuphc(k, hc)
-      }
+      // if (res ne RESTART) res
+      // else res
+      // if (res ne RESTART) res
+      // else {
+      //   if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
+      //   lookuphc(k, hc)
+      // }
     }
   }
   

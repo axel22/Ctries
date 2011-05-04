@@ -26,7 +26,7 @@ class Ctries(info: ProjectInfo) extends DefaultProject(info) {
     comm !;
   }
   
-  def benchcomm(args: String) = "java -server -cp %s:%s:%s %s".format(
+  def benchcomm(args: String) = "java -Xmx1500m -Xms1500m -server -cp %s:%s:%s %s".format(
     packageTestJar,
     buildScalaInstance.libraryJar,
     jarPath,
