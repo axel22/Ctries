@@ -20,7 +20,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
     nin
   }
   
-  final def insert(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V]): Boolean = {
+  @tailrec final def insert(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V]): Boolean = {
     val m = /*READ*/mainnode
     
     m match {
@@ -60,7 +60,7 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
     }
   }
   
-  final def lookup(k: K, hc: Int, lev: Int, parent: INode[K, V]): AnyRef = {
+  @tailrec final def lookup(k: K, hc: Int, lev: Int, parent: INode[K, V]): AnyRef = {
     val m = /*READ*/mainnode
     
     m match {
@@ -122,11 +122,11 @@ final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBa
               val m = /*READ*/mainnode
               m match {
                 case cn: CNode[K, V] =>
-                  val tcn = cn.toWeakTombedCompressed
+                  val tcn: BasicNode = cn.toWeakTombedCompressed
                   if (tcn eq cn) false // we're done, no further compression needed
                   else if (CAS(cn, tcn)) tcn match {
-                    case sn: SNode[K, V] => true // parent contraction needed
                     case null => true // parent contraction needed
+                    case sn: SNode[K, V] => true // parent contraction needed
                     case _ => false // nothing to contract, we're done
                   } else tombCompress()
                 case _ => false // we're done, no further compression needed
