@@ -17,6 +17,7 @@ object AfterDeleteCHM extends Benchmark {
     for (i <- 0 until sz) chm.put(e(i), e(i))
     for (i <- 0 until sz) chm.remove(e(i))
     
+    Runtime.getRuntime.gc()
     while (true) {}
   }
 }
@@ -32,6 +33,7 @@ object AfterDeleteSkipList extends Benchmark {
     for (i <- 0 until sz) skiplist.put(e(i), e(i))
     for (i <- 0 until sz) skiplist.remove(e(i))
     
+    Runtime.getRuntime.gc()
     while (true) {}
   }
 }
@@ -45,6 +47,7 @@ object AfterDeleteCtrie extends Benchmark {
     for (i <- 0 until sz) ctrie.insert(e(i), e(i))
     for (i <- 0 until sz) ctrie.remove(e(i))
     
+    Runtime.getRuntime.gc()
     while (true) {}
   }
 }
@@ -58,6 +61,7 @@ object AfterDeleteCtrie2 extends Benchmark {
     for (i <- 0 until sz) ctrie.insert(e(i), e(i))
     for (i <- 0 until sz) ctrie.remove(e(i))
     
+    Runtime.getRuntime.gc()
     while (true) {}
   }
 }
