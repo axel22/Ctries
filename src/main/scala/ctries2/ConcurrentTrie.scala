@@ -8,14 +8,14 @@ import annotation.switch
 
 
 
-final class INode[K, V](private val updater: AtomicReferenceFieldUpdater[INodeBase, AnyRef]) extends INodeBase {
+final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INodeBase, AnyRef]*/) extends INodeBase {
   
   import INodeBase._
   
-  @inline final def CAS(old: AnyRef, n: AnyRef) = updater.compareAndSet(this, old, n)
+  @inline final def CAS(old: AnyRef, n: AnyRef) = INodeBase.updater.compareAndSet(this, old, n)
   
   @inline private def inode(cn: CNode[K, V]) = {
-    val nin = new INode[K, V](updater)
+    val nin = new INode[K, V]()//(updater)
     /*WRITE*/nin.mainnode = cn
     nin
   }
@@ -404,7 +404,7 @@ object CNode {
     val yidx = (yhc >>> lev) & 0x1f
     val bmp = (1 << xidx) | (1 << yidx)
     if (xidx == yidx) {
-      val subinode = new INode[K, V](ConcurrentTrie.inodeupdater)
+      val subinode = new INode[K, V]()//(ConcurrentTrie.inodeupdater)
       subinode.mainnode = dual(x, xhc, y, yhc, lev + 5)
       new CNode(bmp, Array(subinode))
     } else {
@@ -437,7 +437,7 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     
     // 0) check if the root is a null reference - if so, allocate a new root
     if ((r eq null) || r.isNullInode) {
-      val nroot = new INode[K, V](ConcurrentTrie.inodeupdater)
+      val nroot = new INode[K, V]()//(ConcurrentTrie.inodeupdater)
       nroot.mainnode = CNode.singular(k, v, hc, 0)
       if (!rootupdater.compareAndSet(this, r, nroot)) inserthc(k, hc, v)
     } else if (!r.insert(k, v, hc, 0, null)) inserthc(k, hc, v)
