@@ -26,15 +26,16 @@ object LookupInsertsCHM extends Benchmark {
       val ratio = lookupratio.get
       var i = n * step
       val until = (n + 1) * step
+      val e = elems
       while (i < until) {
         // do an insert
-        chm.put(elems(i), elems(i))
+        chm.put(e(i), e(i))
         i += 1
         
         // do some lookups
         var j = 0
         while (j < ratio) {
-          chm.get(elems(math.abs(j * 0x9e3775cd) % i))
+          chm.get(e(math.abs(j * 0x9e3775cd) % i))
           j += 1
         }
       }
