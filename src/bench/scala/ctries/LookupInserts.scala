@@ -24,8 +24,9 @@ object LookupInsertsCHM extends Benchmark {
   class Worker(chm: ConcurrentHashMap[Elem, Elem], n: Int, step: Int) extends Thread {
     override def run() {
       val ratio = lookupratio.get
-      var i = 0
-      while (i < sz) {
+      var i = n * step
+      val until = (n + 1) * step
+      while (i < until) {
         // do an insert
         chm.put(elems(i), elems(i))
         i += 1
