@@ -34,7 +34,7 @@ object LookupInsertsCHM extends Benchmark {
         // do some lookups
         var j = 0
         while (j < ratio) {
-          chm.get(elems(j * 0x9e3775cd % i))
+          chm.get(elems(math.abs(j * 0x9e3775cd) % i))
           j += 1
         }
       }
