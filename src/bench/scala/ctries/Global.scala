@@ -23,6 +23,7 @@ case class Elem(i: Int) extends Comparable[Elem] {
 object Global {
   val sz = System.getProperty("sz").toInt
   val par = Option(System.getProperty("par")).map(_.toInt)
+  val lookupratio = Option(System.getProperty("lookupratio")).map(_.toInt)
   val elems = (for (i <- 0 until (sz * 2)) yield Elem(i)).toArray
 }
 
