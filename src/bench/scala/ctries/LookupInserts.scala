@@ -9,9 +9,9 @@ import scala.testing.Benchmark
 
 object LookupInsertsCHM extends Benchmark {
   import java.util.concurrent.ConcurrentHashMap
-  val chm = new ConcurrentHashMap[Elem, Elem]
   
   def run() {
+    val chm = new ConcurrentHashMap[Elem, Elem]
     val p = par.get
     val step = sz / p
     
