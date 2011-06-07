@@ -79,3 +79,39 @@ object FixedLookupInsertsCtrie extends Benchmark {
   }
 }
 
+
+object FixedLookupInsertsCtrie2 extends Benchmark {
+  val ct = new ctries2.ConcurrentTrie[Elem, Elem]
+  
+  def run() {
+    val p = par.get
+    val step = sz / p
+    
+    val ins = for (i <- 0 until p) yield new Worker(ct, i, step)
+    
+    for (i <- ins) i.start()
+    for (i <- ins) i.join()
+  }
+  
+  class Worker(ct: ctries2.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+    override def run() {
+      val ratio = lookupratio.get
+      var i = n * step
+      val until = (n + 1) * step
+      val e = elems
+      while (i < until) {
+        // do an insert
+        ct.insert(e(i), e(i))
+        i += 1
+        
+        // do some lookups
+        var j = 0
+        while (j < ratio) {
+          ct.lookup(e(math.abs(j * 0x9e3775cd) % i))
+          j += 1
+        }
+      }
+    }
+  }
+}
+
