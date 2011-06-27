@@ -3,6 +3,7 @@ package ctries2
 
 
 import java.util.concurrent.atomic._
+import collection.immutable.ListMap
 import annotation.tailrec
 import annotation.switch
 
@@ -14,7 +15,7 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
   
   @inline final def CAS(old: AnyRef, n: AnyRef) = INodeBase.updater.compareAndSet(this, old, n)
   
-  @inline private def inode(cn: CNode[K, V]) = {
+  @inline private def inode(cn: BasicNode) = {
     val nin = new INode[K, V]()//(updater)
     /*WRITE*/nin.mainnode = cn
     nin
@@ -57,6 +58,9 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
       case null => // 2) a null-i-node, fix and retry
         if (parent ne null) clean(parent)
         false
+      case ln: LNode[K, V] => // 3) an l-node
+        val nn = ln.inserted(k, v)
+        CAS(ln, nn)
     }
   }
   
@@ -195,6 +199,23 @@ final class SNode[K, V](final val k: K, final val v: V, final val hc: Int, final
   final def copyTombed = new SNode(k, v, hc, true)
   final def copyUntombed = new SNode(k, v, hc, false)
   final def string(lev: Int) = ("  " * lev) + "SNode(%s, %s, %d, %c)".format(k, v, hc, if (tomb) '!' else '_')
+}
+
+
+final class LNode[K, V](final val listmap: ListMap[K, V]) extends BasicNode {
+  def this(k: K, v: V) = this(ListMap(k -> v))
+  def this(k1: K, v1: V, k2: K, v2: V) = this(ListMap(k1 -> v1, k2 -> v2))
+  def inserted(k: K, v: V) = new LNode(listmap + ((k, v)))
+  def removed(k: K) = {
+    val updmap = listmap - k
+    if (updmap.size > 1) new LNode(updmap)
+    else {
+      val (k, v) = listmap.iterator.next
+      new SNode(k, v, k.hashCode, true) // create it tombed so that it gets compressed on subsequent accesses
+    }
+  }
+  def get(k: K) = listmap.get(k)
+  def string(lev: Int) = (" " * lev) + "LNode(%s)".format(listmap.mkString(", "))
 }
 
 
@@ -399,7 +420,7 @@ object CNode {
     new CNode(flag, arr)
   }
   
-  def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int): CNode[K, V] = if (lev < 35) {
+  def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int): BasicNode = if (lev < 35) {
     val xidx = (xhc >>> lev) & 0x1f
     val yidx = (yhc >>> lev) & 0x1f
     val bmp = (1 << xidx) | (1 << yidx)
@@ -411,11 +432,11 @@ object CNode {
       if (xidx < yidx) new CNode(bmp, Array(x, y))
       else new CNode(bmp, Array(y, x))
     }
-  } else sys.error("list nodes not supported yet, lev=%d; %s, %s".format(lev, x.string(lev), y.string(lev)))
+  } else {
+    // sys.error("list nodes not supported yet, lev=%d; %s, %s".format(lev, x.string(lev), y.string(lev)))
+    new LNode(x.k, x.v, y.k, y.v)
+  }
 }
-
-
-// TODO final class LNode
 
 
 class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
@@ -500,5 +521,17 @@ object ConcurrentTrie {
 
 
 object RestartException extends util.control.ControlThrowable
+
+
+
+
+
+
+
+
+
+
+
+
 
 
