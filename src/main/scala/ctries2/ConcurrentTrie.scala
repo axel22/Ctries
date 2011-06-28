@@ -93,6 +93,8 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
         if (parent ne null) clean(parent)
         //RESTART
         throw RestartException
+      case ln: LNode[K, V] =>
+        ln.get(k).asInstanceOf[Option[AnyRef]].orNull
     }
   }
   
@@ -171,6 +173,10 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
       case null =>
         if (parent ne null) clean(parent)
         null
+      case ln: LNode[K, V] =>
+        val optv = ln.get(k)
+        val nn = ln.removed(k)
+        if (CAS(ln, nn)) optv else null
     }
   }
   
@@ -188,6 +194,7 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
     case null => "<null>"
     case sn: SNode[_, _] => "SNode(%s, %s, %d, %c)".format(sn.k, sn.v, sn.hc, if (sn.tomb) '!' else '_')
     case cn: CNode[_, _] => cn.string(lev)
+    case ln: LNode[_, _] => ln.string(lev)
     case x => "<elem: %s>".format(x)
   })
   
@@ -210,7 +217,7 @@ final class LNode[K, V](final val listmap: ListMap[K, V]) extends BasicNode {
     val updmap = listmap - k
     if (updmap.size > 1) new LNode(updmap)
     else {
-      val (k, v) = listmap.iterator.next
+      val (k, v) = updmap.iterator.next
       new SNode(k, v, k.hashCode, true) // create it tombed so that it gets compressed on subsequent accesses
     }
   }
