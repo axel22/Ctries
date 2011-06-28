@@ -3,6 +3,7 @@ package ctries2
 
 
 import java.util.concurrent.atomic._
+import collection.mutable.ConcurrentMap
 import collection.immutable.ListMap
 import annotation.tailrec
 import annotation.switch
@@ -177,6 +178,91 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
         val optv = ln.get(k)
         val nn = ln.removed(k)
         if (CAS(ln, nn)) optv else null
+    }
+  }
+  
+  final def removeif(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V]): Option[V] = {
+    val m = /*READ*/mainnode
+    
+    m match {
+      case cn: CNode[K, V] =>
+        val idx = (hc >>> lev) & 0x1f
+        val bmp = cn.bitmap
+        val flag = 1 << idx
+        if ((bmp & flag) == 0) None
+        else {
+          val pos = Integer.bitCount(bmp & (flag - 1))
+          val sub = cn.array(pos)
+          val res = sub match {
+            case in: INode[K, V] => in.removeif(k, v, hc, lev + 5, this)
+            case sn: SNode[K, V] =>
+              //assert(!sn.tomb)
+              if (sn.hc == hc && sn.k == k && sn.v == v) {
+                var ncn: CNode[K, V] = null
+                if (cn.array.length > 1) ncn = cn.removedAt(pos, flag)
+                if (CAS(cn, ncn)) Some(sn.v) else null
+              } else None
+          }
+          
+          if (res == None || (res eq null)) res
+          else {
+            // tomb-compress
+            @tailrec def tombCompress(): Boolean = {
+              val m = /*READ*/mainnode
+              m match {
+                case cn: CNode[K, V] =>
+                  val tcn: BasicNode = cn.toWeakTombedCompressed
+                  if (tcn eq cn) false // we're done, no further compression needed
+                  else if (CAS(cn, tcn)) tcn match {
+                    case null => true // parent contraction needed
+                    case sn: SNode[K, V] => true // parent contraction needed
+                    case _ => false // nothing to contract, we're done
+                  } else tombCompress()
+                case _ => false // we're done, no further compression needed
+              }
+            }
+            
+            @tailrec def contractParent(nonlive: AnyRef) {
+              val pm = /*READ*/parent.mainnode
+              pm match {
+                case cn: CNode[K, V] =>
+                  val idx = (hc >>> (lev - 5)) & 0x1f
+                  val bmp = cn.bitmap
+                  val flag = 1 << idx
+                  if ((bmp & flag) == 0) {} // somebody already removed this i-node, we're done
+                  else {
+                    val pos = Integer.bitCount(bmp & (flag - 1))
+                    val sub = cn.array(pos)
+                    if (sub eq this)  nonlive match {
+                      case null => if (!parent.CAS(cn, cn.removedAt(pos, flag))) contractParent(nonlive)
+                      case sn: SNode[K, V] => if (!parent.CAS(cn, cn.updatedAt(pos, sn.copyUntombed))) contractParent(nonlive)
+                    }
+                  }
+                case _ => // parent is no longer a cnode, we're done
+              }
+            }
+            
+            if (parent ne null) { // never tomb at root
+              if (tombCompress()) contractParent(/*READ*/mainnode) // note: this inode is non-live in the 'if' body
+            } //else clean(this) // clean root
+            
+            res
+          }
+        }
+      case sn: SNode[K, V] =>
+        //assert(sn.tomb)
+        clean(parent)
+        null
+      case null =>
+        if (parent ne null) clean(parent)
+        null
+      case ln: LNode[K, V] =>
+        ln.get(k) match {
+          case optv @ Some(v0) if v0 == v =>
+            val nn = ln.removed(k)
+            if (CAS(ln, nn)) optv else null
+          case _ => None
+        }
     }
   }
   
@@ -446,7 +532,7 @@ object CNode {
 }
 
 
-class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
+class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   root = null
   private val rootupdater = AtomicReferenceFieldUpdater.newUpdater(classOf[ConcurrentTrieBase[_, _]], classOf[INode[_, _]], "root")
   
@@ -454,10 +540,7 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     k.hashCode
   }
   
-  final def insert(k: K, v: V) {
-    val hc = computeHash(k)
-    inserthc(k, hc, v)
-  }
+  /* internal methods */
   
   //@tailrec
   private def inserthc(k: K, hc: Int, v: V) {
@@ -471,16 +554,6 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     } else if (!r.insert(k, v, hc, 0, null)) inserthc(k, hc, v)
   }
   
-  final def lookupOpt(k: K): Option[V] = {
-    val hc = computeHash(k)
-    Option(lookuphc(k, hc)).asInstanceOf[Option[V]]
-  }
-  
-  final def lookup(k: K): V = {
-    val hc = computeHash(k)
-    lookuphc(k, hc).asInstanceOf[V]
-  }
-  
   //@tailrec
   private def lookuphc(k: K, hc: Int): AnyRef = {
     val r = /*READ*/root
@@ -491,17 +564,13 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
       case RestartException =>
         if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
         lookuphc(k, hc)
+      // used to be:
       // if (res ne RESTART) res
       // else {
       //   if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
       //   lookuphc(k, hc)
       // }
     }
-  }
-  
-  final def remove(k: K): Option[V] = {
-    val hc = computeHash(k)
-    removehc(k, hc)
   }
   
   private def removehc(k: K, hc: Int): Option[V] = {
@@ -517,7 +586,71 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] {
     }
   }
   
+  private def removeifhc(k: K, v: V, hc: Int): Boolean = {
+    val r = /*READ*/root
+    if (r eq null) false
+    else {
+      val res = r.removeif(k, v, hc, 0, null)
+      if (res ne null) res.nonEmpty
+      else {
+        if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
+        removeifhc(k, v, hc)
+      }
+    }
+  }
+  
   private[ctries2] def string = if (root != null) root.string(0) else "<null>"
+  
+  /* public methods */
+  
+  final def lookup(k: K): V = {
+    val hc = computeHash(k)
+    lookuphc(k, hc).asInstanceOf[V]
+  }
+  
+  final override def apply(k: K): V = {
+    val hc = computeHash(k)
+    val res = lookuphc(k, hc)
+    if (res eq null) throw new NoSuchElementException
+    else res.asInstanceOf[V]
+  }
+  
+  final def get(k: K): Option[V] = {
+    val hc = computeHash(k)
+    Option(lookuphc(k, hc)).asInstanceOf[Option[V]]
+  }
+  
+  override def put(key: K, value: V): Option[V]
+  
+  final override def update(k: K, v: V) {
+    val hc = computeHash(k)
+    inserthc(k, hc, v)
+  }
+  
+  final def += (kv: (K, V)) = {
+    update(kv._1, kv._2)
+    this
+  }
+  
+  final override def remove(k: K): Option[V] = {
+    val hc = computeHash(k)
+    removehc(k, hc)
+  }
+  
+  final def -= (k: K) = {
+    remove(k)
+    this
+  }
+  
+  def putIfAbsent(k: K, v: V): Option[V]
+  
+  def remove(k: K, v: V): Boolean
+  
+  def replace(k: K, oldvalue: V, newvalue: V): Boolean
+  
+  def replace(k: K, v: V): Option[V]  
+  
+  def iterator: Iterator[(K, V)]
   
 }
 
