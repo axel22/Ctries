@@ -80,7 +80,7 @@ object FixedLookupInsertsCtrie extends Benchmark {
 }
 
 
-object FixedLookupInsertsCtrie2 extends Benchmark {
+object FixedLookupUpdatesCtrie2 extends Benchmark {
   val ct = new ctries2.ConcurrentTrie[Elem, Elem]
   
   def run() {
@@ -100,8 +100,8 @@ object FixedLookupInsertsCtrie2 extends Benchmark {
       val until = (n + 1) * step
       val e = elems
       while (i < until) {
-        // do an insert
-        ct.insert(e(i), e(i))
+        // do an update
+        ct.update(e(i), e(i))
         i += 1
         
         // do some lookups

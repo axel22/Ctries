@@ -118,7 +118,7 @@ object MultiRemoveCtrie2 extends Benchmark {
   
   override def setUp {
     ct = new ctries2.ConcurrentTrie[Elem, Elem]
-    for (i <- 0 until sz) ct.insert(elems(i), elems(i))
+    for (i <- 0 until sz) ct.update(elems(i), elems(i))
   }
   
   def run() {

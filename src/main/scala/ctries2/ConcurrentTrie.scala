@@ -65,6 +65,86 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
     }
   }
   
+  @tailrec final def insertif(k: K, v: V, hc: Int, cond: AnyRef, lev: Int, parent: INode[K, V]): Option[V] = {
+    val m = /*READ*/mainnode
+    
+    m match {
+      case cn: CNode[K, V] => // 1) a multiway node
+        val idx = (hc >>> lev) & 0x1f
+        val flag = 1 << idx
+        val bmp = cn.bitmap
+        val mask = flag - 1
+        val pos = Integer.bitCount(bmp & mask)
+        if ((bmp & flag) != 0) {
+          // 1a) insert below
+          cn.array(pos) match {
+            case in: INode[K, V] => in.insertif(k, v, hc, cond, lev + 5, this)
+            case sn: SNode[K, V] if !sn.tomb => cond match {
+              case null =>
+                if (sn.hc == hc && sn.k == k) {
+                  if (CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))) Some(sn.v) else null
+                } else
+                  if (CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))) None else null
+              case INode.KEY_ABSENT =>
+                if (sn.hc == hc && sn.k == k) Some(sn.v)
+                else
+                  if (CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))) None else null
+              case INode.KEY_PRESENT =>
+                if (sn.hc == hc && sn.k == k) {
+                  if (CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))) Some(sn.v) else null
+                } else None
+              case otherv: V =>
+                if (sn.hc == hc && sn.k == k && sn.v == otherv) {
+                  if (CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))) Some(sn.v) else null
+                } else None
+            }
+          }
+        } else cond match {
+          case null | INode.KEY_ABSENT =>
+            val len = cn.array.length
+            val narr = new Array[BasicNode](len + 1)
+            val ncnode = new CNode[K, V](bmp | flag, narr)
+            Array.copy(cn.array, 0, narr, 0, pos)
+            narr(pos) = new SNode(k, v, hc, false)
+            Array.copy(cn.array, pos, narr, pos + 1, len - pos)
+            if (CAS(cn, ncnode)) None else null
+          case INode.KEY_PRESENT => None
+          case otherv: V => None
+        }
+      case sn: SNode[K, V] =>
+        clean(parent)
+        null
+      case null => // 2) a null-i-node, fix and retry
+        if (parent ne null) clean(parent)
+        null
+      case ln: LNode[K, V] => // 3) an l-node
+        @inline def insertln() = {
+          val nn = ln.inserted(k, v)
+          CAS(ln, nn)
+        }
+        cond match {
+          case null =>
+            val optv = ln.get(k)
+            if (insertln()) optv else null
+          case INode.KEY_ABSENT =>
+            ln.get(k) match {
+              case None => if (insertln()) None else null
+              case optv => optv
+            }
+          case INode.KEY_PRESENT =>
+            ln.get(k) match {
+              case Some(v0) => if (insertln()) Some(v0) else null
+              case None => None
+            }
+          case otherv: V =>
+            ln.get(k) match {
+              case Some(v0) if v0 == otherv => if (insertln()) Some(otherv) else null
+              case _ => None
+            }
+        }
+    }
+  }
+  
   @tailrec final def lookup(k: K, hc: Int, lev: Int, parent: INode[K, V]): AnyRef = {
     val m = /*READ*/mainnode
     
@@ -284,6 +364,12 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
     case x => "<elem: %s>".format(x)
   })
   
+}
+
+
+object INode {
+  val KEY_PRESENT = new AnyRef
+  val KEY_ABSENT = new AnyRef
 }
 
 
@@ -548,10 +634,30 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K
     
     // 0) check if the root is a null reference - if so, allocate a new root
     if ((r eq null) || r.isNullInode) {
-      val nroot = new INode[K, V]()//(ConcurrentTrie.inodeupdater)
+      val nroot = new INode[K, V]()
       nroot.mainnode = CNode.singular(k, v, hc, 0)
       if (!rootupdater.compareAndSet(this, r, nroot)) inserthc(k, hc, v)
     } else if (!r.insert(k, v, hc, 0, null)) inserthc(k, hc, v)
+  }
+  
+  @tailrec
+  private def insertifhc(k: K, hc: Int, v: V, cond: AnyRef): Option[V] = {
+    val r = /*READ*/root
+    
+    // 0) check if the root is a null reference - if so, allocate a new root
+    if ((r eq null) || r.isNullInode) cond match {
+      case null | INode.KEY_ABSENT =>
+        val nroot = new INode[K, V]()
+        nroot.mainnode = CNode.singular(k, v, hc, 0)
+        if (rootupdater.compareAndSet(this, r, nroot)) None
+        else insertifhc(k, hc, v, cond)
+      case INode.KEY_PRESENT => None
+      case otherv: V => None
+    } else {
+      val ret = r.insertif(k, v, hc, cond, 0, null)
+      if (ret eq null) insertifhc(k, hc, v, cond)
+      else ret
+    }
   }
   
   //@tailrec
@@ -620,7 +726,10 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K
     Option(lookuphc(k, hc)).asInstanceOf[Option[V]]
   }
   
-  override def put(key: K, value: V): Option[V]
+  override def put(key: K, value: V): Option[V] = {
+    val hc = computeHash(key)
+    insertifhc(key, hc, value, null)
+  }
   
   final override def update(k: K, v: V) {
     val hc = computeHash(k)
@@ -642,15 +751,27 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K
     this
   }
   
-  def putIfAbsent(k: K, v: V): Option[V]
+  def putIfAbsent(k: K, v: V): Option[V] = {
+    val hc = computeHash(k)
+    insertifhc(k, hc, v, INode.KEY_ABSENT)
+  }
   
-  def remove(k: K, v: V): Boolean
+  def remove(k: K, v: V) = {
+    val hc = computeHash(k)
+    removeifhc(k, v, hc)
+  }
   
-  def replace(k: K, oldvalue: V, newvalue: V): Boolean
+  def replace(k: K, oldvalue: V, newvalue: V): Boolean = {
+    val hc = computeHash(k)
+    insertifhc(k, hc, newvalue, oldvalue.asInstanceOf[AnyRef]).nonEmpty
+  }
   
-  def replace(k: K, v: V): Option[V]  
+  def replace(k: K, v: V): Option[V] = {
+    val hc = computeHash(k)
+    insertifhc(k, hc, v, INode.KEY_PRESENT)
+  }
   
-  def iterator: Iterator[(K, V)]
+  def iterator: Iterator[(K, V)] = null // TODO
   
 }
 

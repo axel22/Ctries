@@ -58,7 +58,7 @@ object AfterDeleteCtrie2 extends Benchmark {
     val ctrie = new ctries2.ConcurrentTrie[Elem, Elem]
     val e = elems
     
-    for (i <- 0 until sz) ctrie.insert(e(i), e(i))
+    for (i <- 0 until sz) ctrie.update(e(i), e(i))
     for (i <- 0 until sz) ctrie.remove(e(i))
     
     Runtime.getRuntime.gc()
@@ -115,7 +115,7 @@ object MemoryCtrie2 extends Benchmark {
     val ctrie = new ctries2.ConcurrentTrie[Elem, Elem]
     val e = elems
     
-    for (i <- 0 until sz) ctrie.insert(e(i), e(i))
+    for (i <- 0 until sz) ctrie.update(e(i), e(i))
     
     Runtime.getRuntime.gc()
     while (true) {}

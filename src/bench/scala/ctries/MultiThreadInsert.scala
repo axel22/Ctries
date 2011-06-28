@@ -92,26 +92,26 @@ object MultiInsertCtrie extends Benchmark {
 }
 
 
-object MultiInsertCtrie2 extends Benchmark {
+object MultiUpdateCtrie2 extends Benchmark {
   def run() {
     val ct = new ctries2.ConcurrentTrie[Elem, Elem]
     val p = par.get
     val step = sz / p
     
-    val ins = for (i <- 0 until p) yield new Inserter(ct, i, step)
+    val ins = for (i <- 0 until p) yield new Updateer(ct, i, step)
     
     for (i <- ins) i.start()
     for (i <- ins) i.join()
   }
   
-  class Inserter(ct: ctries2.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+  class Updateer(ct: ctries2.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
     override def run() {
       var i = n * step
       val until = (n + 1) * step
       val e = elems
       
       while (i < until) {
-        ct.insert(e(i), e(i))
+        ct.update(e(i), e(i))
         i += 1
       }
     }

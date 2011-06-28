@@ -23,22 +23,23 @@ class LNodeSpec extends WordSpec with ShouldMatchers {
     
     "accept elements with the same hash codes" in {
       val ct = new ConcurrentTrie[DumbHash, Int]
-      for (i <- 0 until 50) ct.insert(new DumbHash(i), i)
+      for (i <- 0 until 50) ct.update(new DumbHash(i), i)
     }
     
     "lookup elements with the same hash codes" in {
       val ct = new ConcurrentTrie[DumbHash, Int]
-      for (i <- 0 until 200) ct.insert(new DumbHash(i), i)
-      for (i <- 0 until 200) assert(ct.lookupOpt(new DumbHash(i)) == Some(i))
-      for (i <- 200 until 250) assert(ct.lookupOpt(new DumbHash(i)) == None)
+      for (i <- 0 until 200) ct.update(new DumbHash(i), i)
+      for (i <- 0 until 200) assert(ct.get(new DumbHash(i)) == Some(i))
+      for (i <- 200 until 250) assert(ct.get(new DumbHash(i)) == None)
     }
     
     "remove elements with the same hash codes" in {
       val ct = new ConcurrentTrie[DumbHash, Int]
-      for (i <- 0 until 200) ct.insert(new DumbHash(i), i)
+      for (i <- 0 until 200) ct.update(new DumbHash(i), i)
       for (i <- 0 until 200) assert(ct.remove(new DumbHash(i)) == Some(i))
-      for (i <- 0 until 200) assert(ct.lookupOpt(new DumbHash(i)) == None)
+      for (i <- 0 until 200) assert(ct.get(new DumbHash(i)) == None)
     }
     
   }
+  
 }
