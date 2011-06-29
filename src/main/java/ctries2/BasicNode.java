@@ -4,8 +4,8 @@ package ctries2;
 
 
 
-public interface BasicNode {
+public abstract class BasicNode {
     
-    public String string(int lev);
+    public abstract String string(int lev);
     
 }

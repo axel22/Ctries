@@ -10,19 +10,19 @@ import annotation.switch
 
 
 
-final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INodeBase, AnyRef]*/) extends INodeBase {
+final class INode[K, V](g: Int) extends INodeBase(0) {
   
   import INodeBase._
   
   @inline final def CAS(old: AnyRef, n: AnyRef) = INodeBase.updater.compareAndSet(this, old, n)
   
   @inline private def inode(cn: BasicNode) = {
-    val nin = new INode[K, V]()//(updater)
+    val nin = new INode[K, V](gen)
     /*WRITE*/nin.mainnode = cn
     nin
   }
   
-  @tailrec final def insert(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V]): Boolean = {
+  @tailrec final def fast_insert(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V]): Boolean = {
     val m = /*READ*/mainnode
     
     m match {
@@ -35,10 +35,10 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
         if ((bmp & flag) != 0) {
           // 1a) insert below
           cn.array(pos) match {
-            case in: INode[K, V] => in.insert(k, v, hc, lev + 5, this)
+            case in: INode[K, V] => in.fast_insert(k, v, hc, lev + 5, this)
             case sn: SNode[K, V] if !sn.tomb =>
               if (sn.hc == hc && sn.k == k) CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))
-              else CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))
+              else CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))))
             // case sn: SNode[K, V] if sn.tomb => // fix!
             //   if (parent ne null) clean(parent)
             //   false
@@ -65,7 +65,7 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
     }
   }
   
-  @tailrec final def insertif(k: K, v: V, hc: Int, cond: AnyRef, lev: Int, parent: INode[K, V]): Option[V] = {
+  @tailrec final def fast_insertif(k: K, v: V, hc: Int, cond: AnyRef, lev: Int, parent: INode[K, V]): Option[V] = {
     val m = /*READ*/mainnode
     
     m match {
@@ -78,17 +78,17 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
         if ((bmp & flag) != 0) {
           // 1a) insert below
           cn.array(pos) match {
-            case in: INode[K, V] => in.insertif(k, v, hc, cond, lev + 5, this)
+            case in: INode[K, V] => in.fast_insertif(k, v, hc, cond, lev + 5, this)
             case sn: SNode[K, V] if !sn.tomb => cond match {
               case null =>
                 if (sn.hc == hc && sn.k == k) {
                   if (CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))) Some(sn.v) else null
                 } else
-                  if (CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))) None else null
+                  if (CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))))) None else null
               case INode.KEY_ABSENT =>
                 if (sn.hc == hc && sn.k == k) Some(sn.v)
                 else
-                  if (CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5))))) None else null
+                  if (CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))))) None else null
               case INode.KEY_PRESENT =>
                 if (sn.hc == hc && sn.k == k) {
                   if (CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))) Some(sn.v) else null
@@ -145,7 +145,7 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
     }
   }
   
-  @tailrec final def lookup(k: K, hc: Int, lev: Int, parent: INode[K, V]): AnyRef = {
+  @tailrec final def fast_lookup(k: K, hc: Int, lev: Int, parent: INode[K, V]): AnyRef = {
     val m = /*READ*/mainnode
     
     m match {
@@ -158,7 +158,7 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
           val pos = Integer.bitCount(bmp & (flag - 1))
           val sub = cn.array(pos)
           sub match {
-            case in: INode[K, V] => in.lookup(k, hc, lev + 5, this)
+            case in: INode[K, V] => in.fast_lookup(k, hc, lev + 5, this)
             case sn: SNode[K, V] => // 2) singleton node
               //assert(!sn.tomb)
               if (sn.hc == hc && sn.k == k) sn.v.asInstanceOf[AnyRef]
@@ -179,7 +179,7 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
     }
   }
   
-  final def remove(k: K, hc: Int, lev: Int, parent: INode[K, V]): Option[V] = {
+  final def fast_remove(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V]): Option[V] = {
     val m = /*READ*/mainnode
     
     m match {
@@ -192,10 +192,10 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
           val pos = Integer.bitCount(bmp & (flag - 1))
           val sub = cn.array(pos)
           val res = sub match {
-            case in: INode[K, V] => in.remove(k, hc, lev + 5, this)
+            case in: INode[K, V] => in.fast_remove(k, v, hc, lev + 5, this)
             case sn: SNode[K, V] =>
               //assert(!sn.tomb)
-              if (sn.hc == hc && sn.k == k) {
+              if (sn.hc == hc && sn.k == k && (v == null || sn.v == v)) {
                 var ncn: CNode[K, V] = null
                 if (cn.array.length > 1) ncn = cn.removedAt(pos, flag)
                 if (CAS(cn, ncn)) Some(sn.v) else null
@@ -255,89 +255,11 @@ final class INode[K, V](/*private val updater: AtomicReferenceFieldUpdater[INode
         if (parent ne null) clean(parent)
         null
       case ln: LNode[K, V] =>
-        val optv = ln.get(k)
-        val nn = ln.removed(k)
-        if (CAS(ln, nn)) optv else null
-    }
-  }
-  
-  final def removeif(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V]): Option[V] = {
-    val m = /*READ*/mainnode
-    
-    m match {
-      case cn: CNode[K, V] =>
-        val idx = (hc >>> lev) & 0x1f
-        val bmp = cn.bitmap
-        val flag = 1 << idx
-        if ((bmp & flag) == 0) None
-        else {
-          val pos = Integer.bitCount(bmp & (flag - 1))
-          val sub = cn.array(pos)
-          val res = sub match {
-            case in: INode[K, V] => in.removeif(k, v, hc, lev + 5, this)
-            case sn: SNode[K, V] =>
-              //assert(!sn.tomb)
-              if (sn.hc == hc && sn.k == k && sn.v == v) {
-                var ncn: CNode[K, V] = null
-                if (cn.array.length > 1) ncn = cn.removedAt(pos, flag)
-                if (CAS(cn, ncn)) Some(sn.v) else null
-              } else None
-          }
-          
-          if (res == None || (res eq null)) res
-          else {
-            // tomb-compress
-            @tailrec def tombCompress(): Boolean = {
-              val m = /*READ*/mainnode
-              m match {
-                case cn: CNode[K, V] =>
-                  val tcn: BasicNode = cn.toWeakTombedCompressed
-                  if (tcn eq cn) false // we're done, no further compression needed
-                  else if (CAS(cn, tcn)) tcn match {
-                    case null => true // parent contraction needed
-                    case sn: SNode[K, V] => true // parent contraction needed
-                    case _ => false // nothing to contract, we're done
-                  } else tombCompress()
-                case _ => false // we're done, no further compression needed
-              }
-            }
-            
-            @tailrec def contractParent(nonlive: AnyRef) {
-              val pm = /*READ*/parent.mainnode
-              pm match {
-                case cn: CNode[K, V] =>
-                  val idx = (hc >>> (lev - 5)) & 0x1f
-                  val bmp = cn.bitmap
-                  val flag = 1 << idx
-                  if ((bmp & flag) == 0) {} // somebody already removed this i-node, we're done
-                  else {
-                    val pos = Integer.bitCount(bmp & (flag - 1))
-                    val sub = cn.array(pos)
-                    if (sub eq this)  nonlive match {
-                      case null => if (!parent.CAS(cn, cn.removedAt(pos, flag))) contractParent(nonlive)
-                      case sn: SNode[K, V] => if (!parent.CAS(cn, cn.updatedAt(pos, sn.copyUntombed))) contractParent(nonlive)
-                    }
-                  }
-                case _ => // parent is no longer a cnode, we're done
-              }
-            }
-            
-            if (parent ne null) { // never tomb at root
-              if (tombCompress()) contractParent(/*READ*/mainnode) // note: this inode is non-live in the 'if' body
-            } //else clean(this) // clean root
-            
-            res
-          }
-        }
-      case sn: SNode[K, V] =>
-        //assert(sn.tomb)
-        clean(parent)
-        null
-      case null =>
-        if (parent ne null) clean(parent)
-        null
-      case ln: LNode[K, V] =>
-        ln.get(k) match {
+        if (v == null) {
+          val optv = ln.get(k)
+          val nn = ln.removed(k)
+          if (CAS(ln, nn)) optv else null
+        } else ln.get(k) match {
           case optv @ Some(v0) if v0 == v =>
             val nn = ln.removed(k)
             if (CAS(ln, nn)) optv else null
@@ -599,13 +521,13 @@ object CNode {
     new CNode(flag, arr)
   }
   
-  def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int): BasicNode = if (lev < 35) {
+  def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int, gen: Int): BasicNode = if (lev < 35) {
     val xidx = (xhc >>> lev) & 0x1f
     val yidx = (yhc >>> lev) & 0x1f
     val bmp = (1 << xidx) | (1 << yidx)
     if (xidx == yidx) {
-      val subinode = new INode[K, V]()//(ConcurrentTrie.inodeupdater)
-      subinode.mainnode = dual(x, xhc, y, yhc, lev + 5)
+      val subinode = new INode[K, V](gen)//(ConcurrentTrie.inodeupdater)
+      subinode.mainnode = dual(x, xhc, y, yhc, lev + 5, gen)
       new CNode(bmp, Array(subinode))
     } else {
       if (xidx < yidx) new CNode(bmp, Array(x, y))
@@ -628,79 +550,73 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K
   
   /* internal methods */
   
-  //@tailrec
-  private def inserthc(k: K, hc: Int, v: V) {
+  @tailrec private def inserthc(k: K, hc: Int, v: V) {
     val r = /*READ*/root
     
     // 0) check if the root is a null reference - if so, allocate a new root
     if ((r eq null) || r.isNullInode) {
-      val nroot = new INode[K, V]()
+      val nroot = new INode[K, V](0)
       nroot.mainnode = CNode.singular(k, v, hc, 0)
       if (!rootupdater.compareAndSet(this, r, nroot)) inserthc(k, hc, v)
-    } else if (!r.insert(k, v, hc, 0, null)) inserthc(k, hc, v)
+    } else if (!r.fast_insert(k, v, hc, 0, null)) inserthc(k, hc, v)
   }
   
-  @tailrec
-  private def insertifhc(k: K, hc: Int, v: V, cond: AnyRef): Option[V] = {
+  @tailrec private def insertifhc(k: K, hc: Int, v: V, cond: AnyRef): Option[V] = {
     val r = /*READ*/root
     
     // 0) check if the root is a null reference - if so, allocate a new root
     if ((r eq null) || r.isNullInode) cond match {
       case null | INode.KEY_ABSENT =>
-        val nroot = new INode[K, V]()
+        val nroot = new INode[K, V](0)
         nroot.mainnode = CNode.singular(k, v, hc, 0)
         if (rootupdater.compareAndSet(this, r, nroot)) None
         else insertifhc(k, hc, v, cond)
       case INode.KEY_PRESENT => None
       case otherv: V => None
     } else {
-      val ret = r.insertif(k, v, hc, cond, 0, null)
+      val ret = r.fast_insertif(k, v, hc, cond, 0, null)
       if (ret eq null) insertifhc(k, hc, v, cond)
       else ret
     }
   }
+  
+  /*
+  @tailrec private def lookuphc(k: K, hc: Int): AnyRef = {
+    val r = /*READ*/root
+    if (r eq null) null
+    else {
+      val res = r.fast_lookup(k, hc, 0, null)
+      if (res ne RESTART) res
+      else {
+        if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
+        lookuphc(k, hc)
+      }
+    }
+  }
+  */
   
   //@tailrec
   private def lookuphc(k: K, hc: Int): AnyRef = {
     val r = /*READ*/root
     if (r eq null) null
     else try {
-      r.lookup(k, hc, 0, null)
+      r.fast_lookup(k, hc, 0, null)
     } catch {
       case RestartException =>
         if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
         lookuphc(k, hc)
-      // used to be:
-      // if (res ne RESTART) res
-      // else {
-      //   if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
-      //   lookuphc(k, hc)
-      // }
     }
   }
   
-  private def removehc(k: K, hc: Int): Option[V] = {
+  @tailrec private def removehc(k: K, v: V, hc: Int): Option[V] = {
     val r = /*READ*/root
     if (r eq null) None
     else {
-      val res = r.remove(k, hc, 0, null)
+      val res = r.fast_remove(k, v, hc, 0, null)
       if (res ne null) res
       else {
         if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
-        removehc(k, hc)
-      }
-    }
-  }
-  
-  private def removeifhc(k: K, v: V, hc: Int): Boolean = {
-    val r = /*READ*/root
-    if (r eq null) false
-    else {
-      val res = r.removeif(k, v, hc, 0, null)
-      if (res ne null) res.nonEmpty
-      else {
-        if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
-        removeifhc(k, v, hc)
+        removehc(k, v, hc)
       }
     }
   }
@@ -743,7 +659,7 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K
   
   final override def remove(k: K): Option[V] = {
     val hc = computeHash(k)
-    removehc(k, hc)
+    removehc(k, null.asInstanceOf[V], hc)
   }
   
   final def -= (k: K) = {
@@ -758,7 +674,7 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K
   
   def remove(k: K, v: V) = {
     val hc = computeHash(k)
-    removeifhc(k, v, hc)
+    removehc(k, v, hc).nonEmpty
   }
   
   def replace(k: K, oldvalue: V, newvalue: V): Boolean = {

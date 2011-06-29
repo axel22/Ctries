@@ -98,13 +98,13 @@ object MultiUpdateCtrie2 extends Benchmark {
     val p = par.get
     val step = sz / p
     
-    val ins = for (i <- 0 until p) yield new Updateer(ct, i, step)
+    val ins = for (i <- 0 until p) yield new Updater(ct, i, step)
     
     for (i <- ins) i.start()
     for (i <- ins) i.join()
   }
   
-  class Updateer(ct: ctries2.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
+  class Updater(ct: ctries2.ConcurrentTrie[Elem, Elem], n: Int, step: Int) extends Thread {
     override def run() {
       var i = n * step
       val until = (n + 1) * step
