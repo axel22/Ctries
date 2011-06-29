@@ -9,51 +9,54 @@ import org.scalatest.matchers.ShouldMatchers
 
 class ConcurrentMapSpec extends WordSpec with ShouldMatchers {
   
+  val initsz = 1500
+  val secondsz = 2000
+  
   "A ctrie2" should {
     
     "support put" in {
       val ct = new ConcurrentTrie[Wrap, Int]
-      for (i <- 0 until 450) assert(ct.put(new Wrap(i), i) == None)
-      for (i <- 0 until 450) assert(ct.put(new Wrap(i), -i) == Some(i))
+      for (i <- 0 until initsz) assert(ct.put(new Wrap(i), i) == None)
+      for (i <- 0 until initsz) assert(ct.put(new Wrap(i), -i) == Some(i))
     }
     
     "support put if absent" in {
       val ct = new ConcurrentTrie[Wrap, Int]
-      for (i <- 0 until 450) ct.update(new Wrap(i), i)
-      for (i <- 0 until 450) assert(ct.putIfAbsent(new Wrap(i), -i) == Some(i))
-      for (i <- 0 until 450) assert(ct.putIfAbsent(new Wrap(i), -i) == Some(i))
-      for (i <- 450 until 500) assert(ct.putIfAbsent(new Wrap(i), -i) == None)
-      for (i <- 450 until 500) assert(ct.putIfAbsent(new Wrap(i), i) == Some(-i))
+      for (i <- 0 until initsz) ct.update(new Wrap(i), i)
+      for (i <- 0 until initsz) assert(ct.putIfAbsent(new Wrap(i), -i) == Some(i))
+      for (i <- 0 until initsz) assert(ct.putIfAbsent(new Wrap(i), -i) == Some(i))
+      for (i <- initsz until secondsz) assert(ct.putIfAbsent(new Wrap(i), -i) == None)
+      for (i <- initsz until secondsz) assert(ct.putIfAbsent(new Wrap(i), i) == Some(-i))
     }
     
     "support remove if mapped to a specific value" in {
       val ct = new ConcurrentTrie[Wrap, Int]
-      for (i <- 0 until 450) ct.update(new Wrap(i), i)
-      for (i <- 0 until 450) assert(ct.remove(new Wrap(i), -i - 1) == false)
-      for (i <- 0 until 450) assert(ct.remove(new Wrap(i), i) == true)
-      for (i <- 0 until 450) assert(ct.remove(new Wrap(i), i) == false)
+      for (i <- 0 until initsz) ct.update(new Wrap(i), i)
+      for (i <- 0 until initsz) assert(ct.remove(new Wrap(i), -i - 1) == false)
+      for (i <- 0 until initsz) assert(ct.remove(new Wrap(i), i) == true)
+      for (i <- 0 until initsz) assert(ct.remove(new Wrap(i), i) == false)
     }
     
     "support replace if mapped to a specific value" in {
       val ct = new ConcurrentTrie[Wrap, Int]
-      for (i <- 0 until 450) ct.update(new Wrap(i), i)
-      for (i <- 0 until 450) assert(ct.replace(new Wrap(i), -i - 1, -i - 2) == false)
-      for (i <- 0 until 450) assert(ct.replace(new Wrap(i), i, -i - 2) == true)
-      for (i <- 0 until 450) assert(ct.replace(new Wrap(i), i, -i - 2) == false)
-      for (i <- 450 until 500) assert(ct.replace(new Wrap(i), i, 0) == false)
+      for (i <- 0 until initsz) ct.update(new Wrap(i), i)
+      for (i <- 0 until initsz) assert(ct.replace(new Wrap(i), -i - 1, -i - 2) == false)
+      for (i <- 0 until initsz) assert(ct.replace(new Wrap(i), i, -i - 2) == true)
+      for (i <- 0 until initsz) assert(ct.replace(new Wrap(i), i, -i - 2) == false)
+      for (i <- initsz until secondsz) assert(ct.replace(new Wrap(i), i, 0) == false)
     }
     
     "support replace if present" in {
       val ct = new ConcurrentTrie[Wrap, Int]
-      for (i <- 0 until 450) ct.update(new Wrap(i), i)
-      for (i <- 0 until 450) assert(ct.replace(new Wrap(i), -i) == Some(i))
-      for (i <- 0 until 450) assert(ct.replace(new Wrap(i), i) == Some(-i))
-      for (i <- 450 until 500) assert(ct.replace(new Wrap(i), i) == None)
+      for (i <- 0 until initsz) ct.update(new Wrap(i), i)
+      for (i <- 0 until initsz) assert(ct.replace(new Wrap(i), -i) == Some(i))
+      for (i <- 0 until initsz) assert(ct.replace(new Wrap(i), i) == Some(-i))
+      for (i <- initsz until secondsz) assert(ct.replace(new Wrap(i), i) == None)
     }
     
     "support replace if mapped to a specific value, using several threads" in {
       val ct = new ConcurrentTrie[Wrap, Int]
-      val sz = 55000
+      val sz = 155000
       for (i <- 0 until sz) ct.update(new Wrap(i), i)
       
       class Updater(index: Int, offs: Int) extends Thread {
@@ -86,7 +89,7 @@ class ConcurrentMapSpec extends WordSpec with ShouldMatchers {
     
     "support put if absent, several threads" in {
       val ct = new ConcurrentTrie[Wrap, Int]
-      val sz = 110000
+      val sz = 210000
       
       class Updater(offs: Int) extends Thread {
         override def run {
@@ -107,7 +110,7 @@ class ConcurrentMapSpec extends WordSpec with ShouldMatchers {
     
     "support remove if mapped to a specific value, several threads" in {
       val ct = new ConcurrentTrie[Wrap, Int]
-      val sz = 55000
+      val sz = 155000
       for (i <- 0 until sz) ct.update(new Wrap(i), i)
       
       class Remover(offs: Int) extends Thread {

@@ -4,8 +4,12 @@ package ctries2;
 
 
 
-public abstract class BasicNode {
+public interface BasicNode {
     
-    public abstract String string(int lev);
+    public String string(int lev);
+    
+    public BasicNode prev();
+    
+    public boolean casPrev(oldval: BasicNode, nval: BasicNode);
     
 }

@@ -5,6 +5,7 @@ package ctries2
 
 import org.scalatest._
 import org.scalatest.matchers.ShouldMatchers
+import annotation.tailrec
 
 
 
@@ -23,14 +24,14 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       println(ct.string)
     }
     
-    "be updateed into" in {
+    "be updated into" in {
       val ct = new ConcurrentTrie[Int, Int]
       ct.update(5, 5)
       println(ct.string)
       assert(ct.get(5) == Some(5))
     }
     
-    "be updateed two values" in {
+    "be updated two values" in {
       val ct = new ConcurrentTrie[Int, Int]
       ct.update(0, 5)
       ct.update(1, 10)
@@ -39,7 +40,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       assert(ct.get(1) == Some(10))
     }
     
-    "be updateed many values" in {
+    "be updated many values" in {
       val sz = 1408
       val ct = new ConcurrentTrie[Int, Int]
       for (i <- 0 until sz) ct.update(i, i)
@@ -47,7 +48,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until sz) assert(ct.get(i) == Some(i))
     }
     
-    "be concurrently updateed non-overlapping values" in {
+    "be concurrently updated non-overlapping values" in {
       val sz = 14080
       val ct = new ConcurrentTrie[Wrap, Int]
       val nump = Runtime.getRuntime.availableProcessors
@@ -65,7 +66,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until (nump * sz)) assert(ct.get(new Wrap(i)) == Some(i), (i, ct.get(new Wrap(i))))
     }
     
-    "be concurrently updateed overlapping values" in {
+    "be concurrently updated overlapping values" in {
       val sz = 125000
       val ct = new ConcurrentTrie[Wrap, Int]
       val nump = Runtime.getRuntime.availableProcessors
@@ -86,7 +87,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until sz) assert(ct.get(new Wrap(i)) == Some(i), (i, ct.get(new Wrap(i))))
     }
     
-    "be updateed into and removed from" in {
+    "be updated into and removed from" in {
       val sz = 148
       val ct = new ConcurrentTrie[Int, Int]
       
@@ -102,7 +103,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       println(ct.string)
     }
     
-    "be updateed many values and removed from" in {
+    "be updated many values and removed from" in {
       val sz = 14800
       val ct = new ConcurrentTrie[Int, Int]
       
@@ -116,7 +117,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       }
     }
     
-    "be alternately updateed into and removed from" in {
+    "be alternately updated into and removed from" in {
       val sz = 32000
       val ct = new ConcurrentTrie[Int, Int]
       
@@ -227,6 +228,64 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       println(ct.string)
     }
     
+    "be concurrently emptied and then filled" in {
+      val sz = 1 << 18
+      val nump = 16
+      val ct = new ConcurrentTrie[Wrap, Int]
+      for (i <- 0 until sz) ct.update(new Wrap(i), i)
+      
+      class Worker(i: Int) extends Thread {
+        override def run {
+          val start = i * sz / nump
+          val end = start + sz / nump
+          for (i <- start until end) ct.remove(new Wrap(i))
+          ct.put(new Wrap(-i), -i)
+          
+          @tailrec def barrier() {
+            if ((0 until nump).exists(i => ct.get(new Wrap(-i)) == None)) barrier()
+          }
+          barrier()
+          
+          for (i <- 0 until sz) ct.put(new Wrap(i), -i)
+        }
+      }
+      
+      val workers = for (i <- 0 until nump) yield new Worker(i)
+      workers.foreach(_.start())
+      workers.foreach(_.join())
+      
+      for (i <- 0 until sz) assert(ct.get(new Wrap(i)) == Some(-i))
+      for (i <- 0 until nump) assert(ct.get(new Wrap(-i)) == Some(-i))
+    }
+    
   }
   
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
