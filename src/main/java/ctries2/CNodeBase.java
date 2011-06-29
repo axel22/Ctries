@@ -4,7 +4,7 @@ package ctries2;
 
 
 
-public abstract class CNodeBase<K, V> implements BasicNode {
+public abstract class CNodeBase<K, V> extends BasicNode {
     
     public int bitmap = 0;
     

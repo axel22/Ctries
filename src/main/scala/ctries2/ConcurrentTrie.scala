@@ -10,7 +10,7 @@ import annotation.switch
 
 
 
-final class INode[K, V](g: Int) extends INodeBase(0) {
+final class INode[K, V](g: Int) extends INodeBase(g) {
   
   import INodeBase._
   
@@ -19,33 +19,44 @@ final class INode[K, V](g: Int) extends INodeBase(0) {
   @inline final def GCAS_READ(ct: ConcurrentTrie[K, V]): BasicNode = {
     val m = /*READ*/mainnode
     val prevval = /*READ*/m.prev
-    if (m eq null || prevval eq null) m else GCAS_COMPLETE(m, prevval, ct)
+    if ((m eq null) || (prevval eq null)) m else GCAS_COMPLETE(m, ct)
   }
   
-  @tailrec final def GCAS_COMPLETE(m: BasicNode, prev: BasicNode, ct: ConcurrentTrie[K, V]) = {
+  @tailrec final def GCAS_COMPLETE(m: BasicNode, ct: ConcurrentTrie[K, V]): BasicNode = {
     // complete the GCAS
+    val prev = /*READ*/m.prev
     val ctr = /*READ*/ct.root
     
-    if (prevval eq null) m
-    else if (prevval eq INVALIDATED) {
-      val nm = /*READ*/mainnode
-      val nprev = /*READ*/nm.prev
-      GCAS_COMPLETE(nm, nprev, ct)
-    } else {
-      if (ctr.gen == gen) {
-        if (m.casPrev(prevval, null)) m
-        else GCAS_COMPLETE(m, /*READ*/m.prev, ct)
-      } else {
-        if (m.casPrev(prevval, INVALIDATED)) { // ups!
-        } else GCAS_COMPLETE(m, /*READ*/m.prev, ct)
-      }
-      // Assume that you've read the root from the generation G.
-      // Assume that the snapshot algorithm is correct.
-      // ==> you can only reach nodes in generations <= G.
-      // ==> `gen` above is <= G.
-      // We know that `ctr.gen` is >= G.
-      // ==> if `ctr.gen` == `gen` then they are both equal to G.
+    prev match {
+      case null =>
+        m
+      case fn: FailedNode => // try to commit to previous value
+        if (CAS(m, fn.prev)) fn.prev
+        else GCAS_COMPLETE(/*READ*/mainnode, ct)
+      case bn: BasicNode =>
+        // Assume that you've read the root from the generation G.
+        // Assume that the snapshot algorithm is correct.
+        // ==> you can only reach nodes in generations <= G.
+        // ==> `gen` is <= G.
+        // We know that `ctr.gen` is >= G.
+        // ==> if `ctr.gen` == `gen` then they are both equal to G.
+        // ==> otherwise, we know that either `ctr.gen` > G, `gen` < G,
+        //     or both
+        if (ctr.gen == gen) {
+          // try to commit
+          if (m.CAS_PREV(prev, null)) m
+          else GCAS_COMPLETE(/*READ*/m, ct)
+        } else {
+          // try to abort
+          m.CAS_PREV(prev, new FailedNode(prev))
+          GCAS_COMPLETE(/*READ*/mainnode, ct)
+        }
     }
+  }
+  
+  @inline final def GCAS(old: BasicNode, n: BasicNode, ct: ConcurrentTrie[K, V]): Boolean = {
+    if (CAS(old, n)) GCAS_COMPLETE(n, ct) eq n
+    else false
   }
   
   @inline private def inode(cn: BasicNode) = {
@@ -324,9 +335,16 @@ object INode {
 }
 
 
-final class SNode[K, V](final val k: K, final val v: V, final val hc: Int, final val tomb: Boolean) extends BasicNode {
-  @volatile var prev: BasicNode = null
+final class FailedNode(p: BasicNode) extends BasicNode {
+  prev = p
   
+  def string(lev: Int) = throw new UnsupportedOperationException
+  def casPrev(ov: BasicNode, nv: BasicNode) = throw new UnsupportedOperationException
+}
+
+
+final class SNode[K, V](final val k: K, final val v: V, final val hc: Int, final val tomb: Boolean)
+extends BasicNode {
   final def copy = new SNode(k, v, hc, tomb)
   final def copyTombed = new SNode(k, v, hc, true)
   final def copyUntombed = new SNode(k, v, hc, false)
@@ -334,9 +352,8 @@ final class SNode[K, V](final val k: K, final val v: V, final val hc: Int, final
 }
 
 
-final class LNode[K, V](final val listmap: ListMap[K, V]) extends BasicNode {
-  @volatile var prev: BasicNode = null
-  
+final class LNode[K, V](final val listmap: ListMap[K, V])
+extends BasicNode {
   def this(k: K, v: V) = this(ListMap(k -> v))
   def this(k1: K, v1: V, k2: K, v2: V) = this(ListMap(k1 -> v1, k2 -> v2))
   def inserted(k: K, v: V) = new LNode(listmap + ((k, v)))
@@ -354,8 +371,6 @@ final class LNode[K, V](final val listmap: ListMap[K, V]) extends BasicNode {
 
 
 final class CNode[K, V](bmp0: Int, a0: Array[BasicNode]) extends CNodeBase[K, V] {
-  @volatile var prev: BasicNode = null
-  
   bitmap = bmp0
   array = a0
   

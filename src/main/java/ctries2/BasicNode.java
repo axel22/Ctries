@@ -2,14 +2,20 @@ package ctries2;
 
 
 
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 
-public interface BasicNode {
+
+public abstract class BasicNode {
     
-    public String string(int lev);
+    public static final AtomicReferenceFieldUpdater<BasicNode, BasicNode> updater = AtomicReferenceFieldUpdater.newUpdater(BasicNode.class, BasicNode.class, "prev");
     
-    public BasicNode prev();
+    public abstract String string(int lev);
     
-    public boolean casPrev(oldval: BasicNode, nval: BasicNode);
+    public volatile BasicNode prev = null;
+    
+    public boolean CAS_PREV(BasicNode oldval, BasicNode nval) {
+	return updater.compareAndSet(this, oldval, nval);
+    }
     
 }
