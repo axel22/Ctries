@@ -55,6 +55,7 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
   }
   
   @inline final def GCAS(old: BasicNode, n: BasicNode, ct: ConcurrentTrie[K, V]): Boolean = {
+    /*WRITE*/n.prev = old
     if (CAS(old, n)) GCAS_COMPLETE(n, ct) eq n
     else false
   }
@@ -65,8 +66,14 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
     nin
   }
   
+  @inline private def copy(ngen: Int, ct: ConcurrentTrie[K, V]) = {
+    val nin = new INode[K, V](ngen)
+    /*WRITE*/nin.mainnode = GCAS_READ(ct)
+    nin
+  }
+  
   @tailrec final def fast_insert(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V], startgen: Int, ct: ConcurrentTrie[K, V]): Boolean = {
-    val m = /*READ*/mainnode
+    val m = GCAS_READ(ct) // use -Yinline!
     
     m match {
       case cn: CNode[K, V] => // 1) a multiway node
@@ -78,10 +85,16 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
         if ((bmp & flag) != 0) {
           // 1a) insert below
           cn.array(pos) match {
-            case in: INode[K, V] => in.fast_insert(k, v, hc, lev + 5, this, startgen, ct)
+            case in: INode[K, V] =>
+              if (startgen == in.gen) in.fast_insert(k, v, hc, lev + 5, this, startgen, ct)
+              else {
+                val nin = in.copy(startgen, ct)
+                if (GCAS(cn, cn.updatedAt(pos, nin), ct)) nin.fast_insert(k, v, hc, lev + 5, this, startgen, ct)
+                else false
+              }
             case sn: SNode[K, V] if !sn.tomb =>
-              if (sn.hc == hc && sn.k == k) CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))
-              else CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))))
+              if (sn.hc == hc && sn.k == k) GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)), ct)
+              else GCAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))), ct)
           }
         } else {
           val len = cn.array.length
@@ -90,7 +103,7 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
           Array.copy(cn.array, 0, narr, 0, pos)
           narr(pos) = new SNode(k, v, hc, false)
           Array.copy(cn.array, pos, narr, pos + 1, len - pos)
-          CAS(cn, ncnode)
+          GCAS(cn, ncnode, ct)
         }
       case sn: SNode[K, V] =>
         //assert(sn.tomb)
@@ -106,7 +119,7 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
   }
   
   @tailrec final def fast_insertif(k: K, v: V, hc: Int, cond: AnyRef, lev: Int, parent: INode[K, V], startgen: Int, ct: ConcurrentTrie[K, V]): Option[V] = {
-    val m = /*READ*/mainnode
+    val m = GCAS_READ(ct)  // use -Yinline!
     
     m match {
       case cn: CNode[K, V] => // 1) a multiway node
@@ -186,7 +199,7 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
   }
   
   @tailrec final def fast_lookup(k: K, hc: Int, lev: Int, parent: INode[K, V], startgen: Int, ct: ConcurrentTrie[K, V]): AnyRef = {
-    val m = /*READ*/mainnode
+    val m = GCAS_READ(ct) // use -Yinline!
     
     m match {
       case cn: CNode[K, V] => // 1) a multinode
@@ -214,13 +227,13 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
         if (parent ne null) clean(parent)
         //RESTART
         throw RestartException
-      case ln: LNode[K, V] =>
+      case ln: LNode[K, V] => // 5) an l-node
         ln.get(k).asInstanceOf[Option[AnyRef]].orNull
     }
   }
   
   final def fast_remove(k: K, v: V, hc: Int, lev: Int, parent: INode[K, V], startgen: Int, ct: ConcurrentTrie[K, V]): Option[V] = {
-    val m = /*READ*/mainnode
+    val m = GCAS_READ(ct) // use -Yinline!
     
     m match {
       case cn: CNode[K, V] =>
