@@ -3,6 +3,7 @@ package ctries2
 
 
 import java.util.concurrent.atomic._
+import collection.Map
 import collection.mutable.ConcurrentMap
 import collection.immutable.ListMap
 import annotation.tailrec
@@ -85,7 +86,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
     nin
   }
   
-  @inline private def copy(ngen: Gen, ct: ConcurrentTrie[K, V]) = {
+  @inline final def copy(ngen: Gen, ct: ConcurrentTrie[K, V]) = {
     val nin = new INode[K, V](ngen)
     /*WRITE*/nin.mainnode = GCAS_READ(ct)
     nin
@@ -645,16 +646,21 @@ object CNode {
 }
 
 
-class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
-  root = new INode[K, V](new Gen)
+class ConcurrentTrie[K, V](r: INode[K, V]) extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   private val rootupdater = AtomicReferenceFieldUpdater.newUpdater(classOf[ConcurrentTrieBase[_, _]], classOf[INode[_, _]], "root")
+  
+  root = r
+  
+  def this() = this(new INode[K, V](new Gen))
+  
+  /* internal methods */
+  
+  @inline private def CAS_ROOT(ov: INode[K, V], nv: INode[K, V]) = rootupdater.compareAndSet(this, ov, nv)
   
   @inline private def computeHash(k: K): Int = {
     k.hashCode
   }
   
-  /* internal methods */
-    
   @tailrec private def inserthc(k: K, hc: Int, v: V) {
     val r = /*READ*/root
     
@@ -724,9 +730,17 @@ class ConcurrentTrie[K, V] extends ConcurrentTrieBase[K, V] with ConcurrentMap[K
   
   /* public methods */
   
-  final def snapshot(): ConcurrentTrie[K, V] = null // TODO
+  @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
+    val r = /*READ*/root
+    if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this))
+    else snapshot()
+  }
   
-  final def readOnlySnapshot(): Map[K, V] = null // TODO
+  @tailrec final def readOnlySnapshot(): Map[K, V] = {
+    val r = /*READ*/root
+    if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r)
+    else readOnlySnapshot()
+  }
   
   final def lookup(k: K): V = {
     val hc = computeHash(k)
