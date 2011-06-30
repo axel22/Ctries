@@ -18,8 +18,10 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
   
   @inline final def GCAS_READ(ct: ConcurrentTrie[K, V]): BasicNode = {
     val m = /*READ*/mainnode
-    val prevval = /*READ*/m.prev
-    if ((m eq null) || (prevval eq null)) m else GCAS_COMPLETE(m, ct)
+    if (m eq null) m else {
+      val prevval = /*READ*/m.prev
+      if (prevval eq null) m else GCAS_COMPLETE(m, ct)
+    }
   }
   
   @tailrec final def GCAS_COMPLETE(m: BasicNode, ct: ConcurrentTrie[K, V]): BasicNode = {
@@ -33,6 +35,7 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
       case fn: FailedNode => // try to commit to previous value
         if (CAS(m, fn.prev)) fn.prev
         else GCAS_COMPLETE(/*READ*/mainnode, ct)
+      case nn: NullNode =>
       case bn: BasicNode =>
         // Assume that you've read the root from the generation G.
         // Assume that the snapshot algorithm is correct.
@@ -54,9 +57,13 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
     }
   }
   
-  @inline final def GCAS(old: BasicNode, n: BasicNode, ct: ConcurrentTrie[K, V]): Boolean = {
+  @inline final def GCAS(old: BasicNode, n: BasicNode, ct: ConcurrentTrie[K, V]): Boolean = if (n ne null) {
     /*WRITE*/n.prev = old
     if (CAS(old, n)) GCAS_COMPLETE(n, ct) eq n
+    else false
+  } else {
+    val nn = new NullNode(old)
+    if (CAS(old, nn)) GCAS_COMPLETE(n, ct) eq null
     else false
   }
   
@@ -107,14 +114,14 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
         }
       case sn: SNode[K, V] =>
         //assert(sn.tomb)
-        clean(parent)
+        clean(parent, ct)
         false
       case null => // 2) a null-i-node, fix and retry
-        if (parent ne null) clean(parent)
+        if (parent ne null) clean(parent, ct)
         false
       case ln: LNode[K, V] => // 3) an l-node
         val nn = ln.inserted(k, v)
-        CAS(ln, nn)
+        GCAS(ln, nn, ct)
     }
   }
   
@@ -135,20 +142,20 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
             case sn: SNode[K, V] if !sn.tomb => cond match {
               case null =>
                 if (sn.hc == hc && sn.k == k) {
-                  if (CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))) Some(sn.v) else null
+                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)), ct)) Some(sn.v) else null
                 } else
-                  if (CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))))) None else null
+                  if (GCAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))), ct)) None else null
               case INode.KEY_ABSENT =>
                 if (sn.hc == hc && sn.k == k) Some(sn.v)
                 else
-                  if (CAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))))) None else null
+                  if (GCAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc, false), hc, lev + 5, gen))), ct)) None else null
               case INode.KEY_PRESENT =>
                 if (sn.hc == hc && sn.k == k) {
-                  if (CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))) Some(sn.v) else null
+                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)), ct)) Some(sn.v) else null
                 } else None
               case otherv: V =>
                 if (sn.hc == hc && sn.k == k && sn.v == otherv) {
-                  if (CAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)))) Some(sn.v) else null
+                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc, false)), ct)) Some(sn.v) else null
                 } else None
             }
           }
@@ -160,20 +167,20 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
             Array.copy(cn.array, 0, narr, 0, pos)
             narr(pos) = new SNode(k, v, hc, false)
             Array.copy(cn.array, pos, narr, pos + 1, len - pos)
-            if (CAS(cn, ncnode)) None else null
+            if (GCAS(cn, ncnode, ct)) None else null
           case INode.KEY_PRESENT => None
           case otherv: V => None
         }
       case sn: SNode[K, V] =>
-        clean(parent)
+        clean(parent, ct)
         null
       case null => // 2) a null-i-node, fix and retry
-        if (parent ne null) clean(parent)
+        if (parent ne null) clean(parent, ct)
         null
       case ln: LNode[K, V] => // 3) an l-node
         @inline def insertln() = {
           val nn = ln.inserted(k, v)
-          CAS(ln, nn)
+          GCAS(ln, nn, ct)
         }
         cond match {
           case null =>
@@ -220,11 +227,11 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
         }
       case sn: SNode[K, V] => // 3) non-live node
         //assert(sn.tomb)
-        clean(parent)
+        clean(parent, ct)
         //RESTART
         throw RestartException
       case null  => // 4) a null-i-node
-        if (parent ne null) clean(parent)
+        if (parent ne null) clean(parent, ct)
         //RESTART
         throw RestartException
       case ln: LNode[K, V] => // 5) an l-node
@@ -251,7 +258,7 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
               if (sn.hc == hc && sn.k == k && (v == null || sn.v == v)) {
                 var ncn: CNode[K, V] = null
                 if (cn.array.length > 1) ncn = cn.removedAt(pos, flag)
-                if (CAS(cn, ncn)) Some(sn.v) else null
+                if (GCAS(cn, ncn, ct)) Some(sn.v) else null
               } else None
           }
           
@@ -259,12 +266,12 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
           else {
             // tomb-compress
             @tailrec def tombCompress(): Boolean = {
-              val m = /*READ*/mainnode
+              val m = GCAS_READ(ct)
               m match {
                 case cn: CNode[K, V] =>
                   val tcn: BasicNode = cn.toWeakTombedCompressed
                   if (tcn eq cn) false // we're done, no further compression needed
-                  else if (CAS(cn, tcn)) tcn match {
+                  else if (GCAS(cn, tcn, ct)) tcn match {
                     case null => true // parent contraction needed
                     case sn: SNode[K, V] => true // parent contraction needed
                     case _ => false // nothing to contract, we're done
@@ -274,7 +281,7 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
             }
             
             @tailrec def contractParent(nonlive: AnyRef) {
-              val pm = /*READ*/parent.mainnode
+              val pm = parent.GCAS_READ(ct)
               pm match {
                 case cn: CNode[K, V] =>
                   val idx = (hc >>> (lev - 5)) & 0x1f
@@ -284,9 +291,9 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
                   else {
                     val pos = Integer.bitCount(bmp & (flag - 1))
                     val sub = cn.array(pos)
-                    if (sub eq this)  nonlive match {
-                      case null => if (!parent.CAS(cn, cn.removedAt(pos, flag))) contractParent(nonlive)
-                      case sn: SNode[K, V] => if (!parent.CAS(cn, cn.updatedAt(pos, sn.copyUntombed))) contractParent(nonlive)
+                    if (sub eq this) nonlive match {
+                      case null => if (!parent.GCAS(cn, cn.removedAt(pos, flag), ct)) contractParent(nonlive)
+                      case sn: SNode[K, V] => if (!parent.GCAS(cn, cn.updatedAt(pos, sn.copyUntombed), ct)) contractParent(nonlive)
                     }
                   }
                 case _ => // parent is no longer a cnode, we're done
@@ -294,7 +301,7 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
             }
             
             if (parent ne null) { // never tomb at root
-              if (tombCompress()) contractParent(/*READ*/mainnode) // note: this inode is non-live in the 'if' body
+              if (tombCompress()) contractParent(GCAS_READ(ct)) // note: this inode is non-live in the 'if' body
             } //else clean(this) // clean root
             
             res
@@ -302,27 +309,27 @@ final class INode[K, V](g: Int) extends INodeBase(g) {
         }
       case sn: SNode[K, V] =>
         //assert(sn.tomb)
-        clean(parent)
+        clean(parent, ct)
         null
       case null =>
-        if (parent ne null) clean(parent)
+        if (parent ne null) clean(parent, ct)
         null
       case ln: LNode[K, V] =>
         if (v == null) {
           val optv = ln.get(k)
           val nn = ln.removed(k)
-          if (CAS(ln, nn)) optv else null
+          if (GCAS(ln, nn, ct)) optv else null
         } else ln.get(k) match {
           case optv @ Some(v0) if v0 == v =>
             val nn = ln.removed(k)
-            if (CAS(ln, nn)) optv else null
+            if (GCAS(ln, nn, ct)) optv else null
           case _ => None
         }
     }
   }
   
-  private def clean(nd: INode[K, V]) {
-    val m = nd.mainnode
+  private def clean(nd: INode[K, V], ct: ConcurrentTrie[K, V]) {
+    val m = nd.GCAS_READ(ct)
     m match {
       case cn: CNode[K, V] => nd.CAS(cn, cn.toCompressed)
       case _ =>
@@ -349,6 +356,14 @@ object INode {
 
 
 final class FailedNode(p: BasicNode) extends BasicNode {
+  prev = p
+  
+  def string(lev: Int) = throw new UnsupportedOperationException
+  def casPrev(ov: BasicNode, nv: BasicNode) = throw new UnsupportedOperationException
+}
+
+
+final class NullNode(p: BasicNode) extends BasicNode {
   prev = p
   
   def string(lev: Int) = throw new UnsupportedOperationException

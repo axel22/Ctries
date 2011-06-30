@@ -17,7 +17,7 @@ class Ctries(info: ProjectInfo) extends DefaultProject(info) {
   
   override def testSourceRoots = super.testSourceRoots +++ (sourcePath / "bench")
   
-  override def compileOptions = super.compileOptions ++ compileOptions("-Yinline")
+  //override def compileOptions = super.compileOptions ++ compileOptions("-Yinline")
   
   /* helpers */
   
