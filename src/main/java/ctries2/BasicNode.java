@@ -18,4 +18,8 @@ public abstract class BasicNode {
 	return updater.compareAndSet(this, oldval, nval);
     }
     
+    public boolean isNullNode() {
+	return false;
+    }
+    
 }
