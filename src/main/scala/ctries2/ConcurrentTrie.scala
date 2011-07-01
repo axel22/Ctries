@@ -30,7 +30,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
   @tailrec private def GCAS_NULLOUT(m: BasicNode): BasicNode = {
     if (m eq null) null
     else if (CAS(m, null)) null
-    else GCAS_NULLOUT(mainnode)
+    else GCAS_NULLOUT(/*READ*/mainnode)
   }
   
   @inline private def GCAS_CHECKNULL(m: BasicNode) = {
@@ -38,7 +38,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
     else m
   }
   
-  @tailrec private def GCAS_COMPLETE(m: BasicNode, ct: ConcurrentTrie[K, V]): BasicNode = {
+  @tailrec private def GCAS_COMPLETE(m: BasicNode, ct: ConcurrentTrie[K, V]): BasicNode = if (m eq null) null else {
     // complete the GCAS
     val prev = /*READ*/m.prev
     val ctr = /*READ*/ct.root
@@ -61,7 +61,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
         if (ctr.gen eq gen) {
           // try to commit
           if (m.CAS_PREV(prev, null)) GCAS_CHECKNULL(m)
-          else GCAS_COMPLETE(/*READ*/m, ct)
+          else GCAS_COMPLETE(/*READ*/mainnode, ct)
         } else {
           // try to abort
           m.CAS_PREV(prev, new FailedNode(prev))
@@ -108,8 +108,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
             case in: INode[K, V] =>
               if (startgen eq in.gen) in.rec_insert(k, v, hc, lev + 5, this, startgen, ct)
               else {
-                val nin = in.copy(startgen, ct)
-                if (GCAS(cn, cn.updatedAt(pos, nin), ct)) nin.rec_insert(k, v, hc, lev + 5, this, startgen, ct)
+                if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_insert(k, v, hc, lev, parent, startgen, ct)
                 else false
               }
             case sn: SNode[K, V] if !sn.tomb =>
@@ -154,8 +153,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
             case in: INode[K, V] =>
               if (startgen eq in.gen) in.rec_insertif(k, v, hc, cond, lev + 5, this, startgen, ct)
               else {
-                val nin = in.copy(startgen, ct)
-                if (GCAS(cn, cn.updatedAt(pos, nin), ct)) nin.rec_insertif(k, v, hc, cond, lev + 5, this, startgen, ct)
+                if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_insertif(k, v, hc, cond, lev, parent, startgen, ct)
                 else null
               }
             case sn: SNode[K, V] if !sn.tomb => cond match {
@@ -274,8 +272,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
             case in: INode[K, V] => 
               if (startgen eq in.gen) in.rec_remove(k, v, hc, lev + 5, this, startgen, ct)
               else {
-                val nin = in.copy(startgen, ct)
-                if (GCAS(cn, cn.updatedAt(pos, nin), ct)) nin.rec_remove(k, v, hc, lev + 5, this, startgen, ct)
+                if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_remove(k, v, hc, lev, parent, startgen, ct)
                 else null
               }
             case sn: SNode[K, V] =>
@@ -300,7 +297,10 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
                     case null => true // parent contraction needed
                     case sn: SNode[K, V] => true // parent contraction needed
                     case _ => false // nothing to contract, we're done
-                  } else tombCompress()
+                  } else {
+                    if (ct.root.gen == startgen) tombCompress()
+                    else false
+                  }
                 case _ => false // we're done, no further compression needed
               }
             }
@@ -317,8 +317,8 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
                     val pos = Integer.bitCount(bmp & (flag - 1))
                     val sub = cn.array(pos)
                     if (sub eq this) nonlive match {
-                      case null => if (!parent.GCAS(cn, cn.removedAt(pos, flag), ct)) contractParent(nonlive)
-                      case sn: SNode[K, V] => if (!parent.GCAS(cn, cn.updatedAt(pos, sn.copyUntombed), ct)) contractParent(nonlive)
+                      case null => if (!parent.GCAS(cn, cn.removedAt(pos, flag), ct)) if (ct.root.gen == startgen) contractParent(nonlive)
+                      case sn: SNode[K, V] => if (!parent.GCAS(cn, cn.updatedAt(pos, sn.copyUntombed), ct)) if (ct.root.gen == startgen) contractParent(nonlive)
                     }
                   }
                 case _ => // parent is no longer a cnode, we're done
@@ -356,7 +356,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
   private def clean(nd: INode[K, V], ct: ConcurrentTrie[K, V]) {
     val m = nd.GCAS_READ(ct)
     m match {
-      case cn: CNode[K, V] => nd.CAS(cn, cn.toCompressed)
+      case cn: CNode[K, V] => nd.GCAS(cn, cn.toCompressed, ct)
       case _ =>
     }
   }
@@ -445,6 +445,24 @@ extends CNodeBase[K, V] with ValueNode {
     Array.copy(arr, 0, narr, 0, pos)
     Array.copy(arr, pos + 1, narr, pos, len - pos - 1)
     new CNode[K, V](bitmap ^ flag, narr)
+  }
+  
+  /** Returns a copy of this cnode such that all the i-nodes below it are copied
+   *  to the specified generation `ngen`.
+   */
+  final def renewed(ngen: Gen, ct: ConcurrentTrie[K, V]) = {
+    var i = 0
+    val arr = array
+    val len = arr.length
+    val narr = new Array[BasicNode](len)
+    while (i < len) {
+      arr(i) match {
+        case in: INode[K, V] => narr(i) = in.copy(ngen, ct)
+        case bn: BasicNode => narr(i) = bn
+      }
+      i += 1
+    }
+    new CNode(bitmap, narr)
   }
   
   private def resurrect(inode: INode[K, V], inodemain: AnyRef) = inodemain match {
@@ -646,12 +664,16 @@ object CNode {
 }
 
 
-class ConcurrentTrie[K, V](r: INode[K, V]) extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
-  private val rootupdater = AtomicReferenceFieldUpdater.newUpdater(classOf[ConcurrentTrieBase[_, _]], classOf[INode[_, _]], "root")
+class ConcurrentTrie[K, V] private (r: INode[K, V], rtupd: AtomicReferenceFieldUpdater[ConcurrentTrieBase[K, V], INode[K, V]])
+extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
+  private val rootupdater = rtupd
   
   root = r
   
-  def this() = this(new INode[K, V](new Gen))
+  def this() = this(
+    new INode[K, V](new Gen),
+    AtomicReferenceFieldUpdater.newUpdater(classOf[ConcurrentTrieBase[K, V]], classOf[INode[K, V]], "root")
+  )
   
   /* internal methods */
   
@@ -732,13 +754,13 @@ class ConcurrentTrie[K, V](r: INode[K, V]) extends ConcurrentTrieBase[K, V] with
   
   @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
     val r = /*READ*/root
-    if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this))
+    if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this), rootupdater)
     else snapshot()
   }
   
   @tailrec final def readOnlySnapshot(): Map[K, V] = {
     val r = /*READ*/root
-    if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r)
+    if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r, null)
     else readOnlySnapshot()
   }
   
@@ -804,7 +826,9 @@ class ConcurrentTrie[K, V](r: INode[K, V]) extends ConcurrentTrieBase[K, V] with
     insertifhc(k, hc, v, INode.KEY_PRESENT)
   }
   
-  def iterator: Iterator[(K, V)] = readOnlySnapshot().iterator
+  def iterator: Iterator[(K, V)] = if (rootupdater ne null) readOnlySnapshot().iterator else {
+    null // TODO
+  }
   
 }
 
