@@ -54,7 +54,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       val nump = Runtime.getRuntime.availableProcessors
       
       class Updateer(mult: Int) extends Thread {
-        override def run {
+        override def run() {
           for (i <- 0 until sz) ct.update(new Wrap(i + mult * sz), i + mult * sz)
         }
       }
@@ -72,7 +72,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       val nump = Runtime.getRuntime.availableProcessors
       
       class Updateer(mult: Int) extends Thread {
-        override def run {
+        override def run() {
           for (i <- 0 until sz) {
             val x = (i + mult * (sz / nump)) % sz
             ct.update(new Wrap(x), x)
@@ -136,7 +136,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until sz) assert(ct.get(new Wrap(i)) == Some(i))
       
       class Remover(mult: Int) extends Thread {
-        override def run {
+        override def run() {
           for (i <- (mult * perthread) until (mult * perthread + perthread)) ct.remove(new Wrap(i))
         }
       }
@@ -176,7 +176,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until sz) assert(ct.get(new Wrap(i)) == Some(i))
       
       class Remover(mult: Int) extends Thread {
-        override def run {
+        override def run() {
           for (i <- 0 until sz) {
             val x = (i + mult * (sz / nump)) % sz
             ct.remove(new Wrap(x))
@@ -201,13 +201,13 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until presz) ct.update(new Wrap(i), i)
       
       class Updater(mult: Int) extends Thread {
-        override def run {
+        override def run() {
           for (i <- 0 until chsz) ct.update(new Wrap(presz + i), i)
         }
       }
       
       class Remover(offset: Int, total: Int, mult: Int) extends Thread {
-        override def run {
+        override def run() {
           for (i <- 0 until total) ct.remove(new Wrap(offset + i))
         }
       }
@@ -235,7 +235,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until sz) ct.update(new Wrap(i), i)
       
       class Worker(i: Int) extends Thread {
-        override def run {
+        override def run() {
           val start = i * sz / nump
           val end = start + sz / nump
           for (i <- start until end) ct.remove(new Wrap(i))
@@ -256,6 +256,64 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
       
       for (i <- 0 until sz) assert(ct.get(new Wrap(i)) == Some(-i))
       for (i <- 0 until nump) assert(ct.get(new Wrap(-i)) == Some(-i))
+    }
+    
+    "be concurrently looked up, emptied and filled" in {
+      val R = 5
+      val W = 10
+      val filltimes = 10
+      val readtimes = 100
+      val sz = 145000
+      val ct = new ConcurrentTrie[Wrap, Int]
+      
+      class Reader extends Thread {
+        override def run() {
+          for (k <- 0 until readtimes) {
+            for (i <- 0 until sz) ct.get(new Wrap(i))
+          }
+        }
+      }
+      
+      class Filler extends Thread {
+        override def run() {
+          for (i <- 0 until sz) ct.put(new Wrap(i), i)
+        }
+      }
+      
+      class Remover extends Thread {
+        override def run() {
+          for (i <- 0 until sz) ct.remove(new Wrap(i))
+        }
+      }
+      
+      def fill() {
+        val fs = for (i <- 0 until W) yield new Filler
+        fs.foreach(_.start())
+        fs.foreach(_.join())
+      }
+      
+      def empty() {
+        val rs = for (i <- 0 until W) yield new Remover
+        rs.foreach(_.start())
+        rs.foreach(_.join())
+      }
+      
+      def checkEmpty = for (i <- 0 until sz) assert(ct.get(new Wrap(i)) == None)
+      
+      fill()
+      
+      val readers = for (i <- 0 until R) yield new Reader
+      readers.foreach(_.start())
+      
+      for (i <- 0 until filltimes) {
+        empty()
+        fill()
+      }
+      empty()
+      
+      checkEmpty
+      readers.foreach(_.join())
+      checkEmpty
     }
     
   }

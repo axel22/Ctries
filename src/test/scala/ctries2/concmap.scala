@@ -54,19 +54,24 @@ class ConcurrentMapSpec extends WordSpec with ShouldMatchers {
       for (i <- initsz until secondsz) assert(ct.replace(new Wrap(i), i) == None)
     }
     
+    def assertEqual(a: Any, b: Any) = {
+      if (a != b) println(a, b)
+      assert(a == b)
+    }
+    
     "support replace if mapped to a specific value, using several threads" in {
       val ct = new ConcurrentTrie[Wrap, Int]
       val sz = 155000
       for (i <- 0 until sz) ct.update(new Wrap(i), i)
       
       class Updater(index: Int, offs: Int) extends Thread {
-        override def run {
+        override def run() {
           var repeats = 0
           for (i <- 0 until sz) {
             val j = (offs + i) % sz
-            var k = -1
+            var k = Int.MaxValue
             do {
-              if (k != -1) repeats += 1
+              if (k != Int.MaxValue) repeats += 1
               k = ct.lookup(new Wrap(j))
             } while (!ct.replace(new Wrap(j), k, -k))
           }
@@ -78,13 +83,13 @@ class ConcurrentMapSpec extends WordSpec with ShouldMatchers {
       threads.foreach(_.start())
       threads.foreach(_.join())
       
-      for (i <- 0 until sz) assert(ct(new Wrap(i)) == i)
+      for (i <- 0 until sz) assertEqual(ct(new Wrap(i)), i)
       
       val threads2 = for (i <- 0 until 15) yield new Updater(i, sz / 32 * i)
       threads2.foreach(_.start())
       threads2.foreach(_.join())
       
-      for (i <- 0 until sz) assert(ct(new Wrap(i)) == -i)
+      for (i <- 0 until sz) assertEqual(ct(new Wrap(i)), -i)
     }
     
     "support put if absent, several threads" in {
@@ -92,7 +97,7 @@ class ConcurrentMapSpec extends WordSpec with ShouldMatchers {
       val sz = 210000
       
       class Updater(offs: Int) extends Thread {
-        override def run {
+        override def run() {
           for (i <- 0 until sz) {
             val j = (offs + i) % sz
             ct.putIfAbsent(new Wrap(j), j)
@@ -114,7 +119,7 @@ class ConcurrentMapSpec extends WordSpec with ShouldMatchers {
       for (i <- 0 until sz) ct.update(new Wrap(i), i)
       
       class Remover(offs: Int) extends Thread {
-        override def run {
+        override def run() {
           for (i <- 0 until sz) {
             val j = (offs + i) % sz
             ct.remove(new Wrap(j), j)
@@ -128,6 +133,39 @@ class ConcurrentMapSpec extends WordSpec with ShouldMatchers {
       threads.foreach(_.join())
       
       for (i <- 0 until sz) assert(ct.get(new Wrap(i)) == None)
+    }
+    
+    "have all or none of the elements depending on the oddity" in {
+      val ct = new ConcurrentTrie[Wrap, Int]
+      val sz = 65000
+      for (i <- 0 until sz) ct(new Wrap(i)) = i
+      
+      class Modifier(index: Int, offs: Int) extends Thread {
+        override def run() {
+          for (j <- 0 until sz) {
+            val i = (offs + j) % sz
+            var success = false
+            do {
+              if (ct.contains(new Wrap(i))) {
+                success = ct.remove(new Wrap(i)) != None
+              } else {
+                success = ct.putIfAbsent(new Wrap(i), i) == None
+              }
+            } while (!success)
+          }
+        }
+      }
+      
+      def modify(n: Int) = {
+        val threads = for (i <- 0 until n) yield new Modifier(i, sz / n * i)
+        threads.foreach(_.start())
+        threads.foreach(_.join())
+      }
+      
+      modify(16)
+      for (i <- 0 until sz) assertEqual(ct.get(new Wrap(i)), Some(i))
+      modify(15)
+      for (i <- 0 until sz) assertEqual(ct.get(new Wrap(i)), None)
     }
     
   }
