@@ -82,7 +82,7 @@ class SnapshotSpec extends WordSpec with ShouldMatchers {
             for (i <- 0 until sz) {
               val tres = trie.get(new Wrap(i))
               val ires = initial.get(new Wrap(i))
-              if (tres != ires) println(i, "initially: " + ires, "after: " + tres)
+              if (tres != ires) println(i, "initially: " + ires, "traversal %d: %s".format(k, tres))
               assert(tres == ires)
             }
           }
@@ -169,7 +169,75 @@ class SnapshotSpec extends WordSpec with ShouldMatchers {
       threads.foreach(_.join())
     }
     
+    def consistentNonReadOnly(name: String, trie: ConcurrentTrie[Wrap, Int], sz: Int, N: Int) {
+      @volatile var e: Exception = null
+      
+      // reads possible entries once and stores them
+      // then reads all these N more times to check if the
+      // state stayed the same
+      class Worker extends Thread {
+        setName("Worker " + name)
+        
+        override def run() =
+          try check()
+          catch {
+            case ex: Exception => e = ex
+          }
+        
+        def check() {
+          val initial = mutable.Map[Wrap, Int]()
+          for (i <- 0 until sz) trie.get(new Wrap(i)) match {
+            case Some(i) => initial.put(new Wrap(i), i)
+            case None => // do nothing
+          }
+          
+          for (k <- 0 until N) {
+            // modify
+            for ((key, value) <- initial) {
+              val oldv = if (k % 2 == 0) value else -value
+              val newv = -oldv
+              trie.replace(key, oldv, newv)
+            }
+            
+            // check
+            for (i <- 0 until sz) if (initial.contains(new Wrap(i))) {
+              val expected = if (k % 2 == 0) -i else i
+              //println(trie.get(new Wrap(i)))
+              assert(trie.get(new Wrap(i)) == Some(expected))
+            } else {
+              assert(trie.get(new Wrap(i)) == None)
+            }
+          }
+        }
+      }
+      
+      val worker = new Worker
+      worker.start()
+      worker.join()
+      
+      if (e ne null) {
+        e.printStackTrace()
+        throw e
+      }
+    }
     
+    "have a consistent non-quiescent snapshot, concurrent with modifications" in {
+      val sz = 1000
+      val N = 9000
+      val W = 10
+      val S = 2000
+      
+      val ct = new ConcurrentTrie[Wrap, Int]
+      for (i <- 0 until sz) ct(new Wrap(i)) = i
+      val threads = for (i <- 0 until W) yield new Modifier(ct, i, N, sz)
+      
+      threads.foreach(_.start())
+      for (i <- 0 until S) {
+        consistentReadOnly("non-qm", ct.snapshot(), sz, 5)
+        consistentNonReadOnly("non-qsnap", ct.snapshot(), sz, 5)
+      }
+      threads.foreach(_.join())
+    }
     
   }
   

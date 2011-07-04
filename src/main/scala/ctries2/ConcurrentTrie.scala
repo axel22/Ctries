@@ -58,7 +58,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
         // ==> if `ctr.gen` = `gen` then they are both equal to G.
         // ==> otherwise, we know that either `ctr.gen` > G, `gen` < G,
         //     or both
-        if (ctr.gen eq gen) {
+        if ((ctr.gen eq gen) && ct.nonReadOnly) {
           // try to commit
           if (m.CAS_PREV(prev, null)) GCAS_CHECKNULL(m)
           else GCAS_COMPLETE(/*READ*/mainnode, ct)
@@ -752,6 +752,10 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   /* public methods */
   
+  @inline final def isReadOnly = rootupdater eq null
+  
+  @inline final def nonReadOnly = rootupdater ne null
+  
   @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
     val r = /*READ*/root
     if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this), rootupdater)
@@ -826,7 +830,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
     insertifhc(k, hc, v, INode.KEY_PRESENT)
   }
   
-  def iterator: Iterator[(K, V)] = if (rootupdater ne null) readOnlySnapshot().iterator else {
+  def iterator: Iterator[(K, V)] = if (nonReadOnly) readOnlySnapshot().iterator else {
     null // TODO
   }
   
