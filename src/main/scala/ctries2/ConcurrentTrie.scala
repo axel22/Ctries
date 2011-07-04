@@ -236,7 +236,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
           val sub = cn.array(pos)
           sub match {
             case in: INode[K, V] =>
-              if ((startgen eq in.gen) || ct.isReadOnly) in.rec_lookup(k, hc, lev + 5, this, startgen, ct)
+              if (ct.isReadOnly || (startgen eq in.gen)) in.rec_lookup(k, hc, lev + 5, this, startgen, ct)
               else {
                 if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_lookup(k, hc, lev, parent, startgen, ct)
                 else throw RestartException
