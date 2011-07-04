@@ -76,7 +76,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
     else false
   } else {
     val nn = new NullNode(old)
-    if (CAS(old, nn)) GCAS_COMPLETE(nn, ct) eq null // TODO fix this!
+    if (CAS(old, nn)) GCAS_COMPLETE(nn, ct) eq null
     else false
   }
   
