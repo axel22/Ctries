@@ -415,6 +415,7 @@ extends BasicNode with ValueNode {
   final def copy = new SNode(k, v, hc, tomb)
   final def copyTombed = new SNode(k, v, hc, true)
   final def copyUntombed = new SNode(k, v, hc, false)
+  final def kvPair = (k, v)
   final def string(lev: Int) = ("  " * lev) + "SNode(%s, %s, %d, %c)".format(k, v, hc, if (tomb) '!' else '_')
 }
 
@@ -844,15 +845,83 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
     insertifhc(k, hc, v, INode.KEY_PRESENT)
   }
   
-  def iterator: Iterator[(K, V)] = if (nonReadOnly) readOnlySnapshot().iterator else {
-    null // TODO
-  }
+  def iterator: Iterator[(K, V)] =
+    if (nonReadOnly) readOnlySnapshot().iterator
+    else new CtrieIterator(this)
   
 }
 
 
 object ConcurrentTrie {
   val inodeupdater = AtomicReferenceFieldUpdater.newUpdater(classOf[INodeBase], classOf[AnyRef], "mainnode")
+}
+
+
+class CtrieIterator[K, V](ct: ConcurrentTrie[K, V]) extends Iterator[(K, V)] {
+  var stack = new Array[Array[BasicNode]](7)
+  var stackpos = new Array[Int](7)
+  var depth = -1
+  var subiter: Iterator[(K, V)] = null
+  var current: SNode[K, V] = null
+  
+  initialize()
+  
+  def hasNext = (current ne null) || (subiter ne null)
+  
+  def next() = if (hasNext) {
+    var r: (K, V) = null
+    if (subiter ne null) {
+      r = subiter.next()
+      checkSubiter()
+    } else {
+      r = current.kvPair
+      advance()
+    }
+    r
+  } else Iterator.empty.next()
+  
+  private def readin(in: INode[K, V]) = in.GCAS_READ(ct) match {
+    case cn: CNode[K, V] =>
+      depth += 1
+      stack(depth) = cn.array
+      stackpos(depth) = -1
+      advance()
+    case sn: SNode[K, V] =>
+      current = sn
+    case ln: LNode[K, V] =>
+      subiter = ln.listmap.iterator
+      checkSubiter()
+    case null =>
+      current = null
+  }
+  
+  @inline private def checkSubiter() = if (!subiter.hasNext) {
+    subiter = null
+    advance()
+  }
+  
+  @inline private def initialize() {
+    assert(ct.isReadOnly)
+    
+    val r = /*READ*/ct.root
+    readin(r)
+  }
+  
+  private def advance(): Unit = if (depth >= 0) {
+    val npos = stackpos(depth) + 1
+    if (npos < stack(depth).length) {
+      stackpos(depth) = npos
+      stack(depth)(npos) match {
+        case sn: SNode[K, V] =>
+          current = sn
+        case in: INode[K, V] =>
+          readin(in)
+      }
+    } else {
+      depth -= 1
+      advance()
+    }
+  } else current = null
 }
 
 

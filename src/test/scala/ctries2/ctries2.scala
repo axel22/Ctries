@@ -9,11 +9,6 @@ import annotation.tailrec
 
 
 
-case class Wrap(i: Int) {
-  override def hashCode = i * 0x9e3775cd
-}
-
-
 class CtrieSpec extends WordSpec with ShouldMatchers {
   
   "A ctrie2" should {
