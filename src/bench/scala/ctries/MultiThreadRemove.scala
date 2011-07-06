@@ -11,7 +11,7 @@ object MultiRemoveCHM extends Benchmark {
   import java.util.concurrent.ConcurrentHashMap
   var chm = new ConcurrentHashMap[Elem, Elem]
   
-  override def setUp {
+  override def setUp() {
     chm = new ConcurrentHashMap[Elem, Elem]
     for (i <- 0 until sz) chm.put(elems(i), elems(i))
   }
@@ -50,7 +50,7 @@ object MultiRemoveSkipList extends Benchmark {
   import java.util.concurrent.ConcurrentSkipListMap
   var skiplist = new ConcurrentSkipListMap[Elem, Elem]
   
-  override def setUp {
+  override def setUp() {
     skiplist = new ConcurrentSkipListMap[Elem, Elem]
     for (i <- 0 until sz) skiplist.put(elems(i), elems(i))
   }
@@ -83,7 +83,7 @@ object MultiRemoveSkipList extends Benchmark {
 object MultiRemoveCtrie extends Benchmark {
   var ct = new ctries.ConcurrentTrie[Elem, Elem]
   
-  override def setUp {
+  override def setUp() {
     ct = new ctries.ConcurrentTrie[Elem, Elem]
     for (i <- 0 until sz) ct.insert(elems(i), elems(i))
   }
@@ -116,7 +116,7 @@ object MultiRemoveCtrie extends Benchmark {
 object MultiRemoveCtrie2 extends Benchmark {
   var ct = new ctries2.ConcurrentTrie[Elem, Elem]
   
-  override def setUp {
+  override def setUp() {
     ct = new ctries2.ConcurrentTrie[Elem, Elem]
     for (i <- 0 until sz) ct.update(elems(i), elems(i))
   }

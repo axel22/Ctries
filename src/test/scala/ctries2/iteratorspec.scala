@@ -186,6 +186,7 @@ class IteratorSpec extends WordSpec with ShouldMatchers {
       val sz = 450000
       val sgroupsize = 40
       val sgroupnum = 20
+      val removerslowdown = 50
       val ct = new ConcurrentTrie[Wrap, Int]
       for (i <- 0 until sz) ct.put(new Wrap(i), i)
       
@@ -193,8 +194,9 @@ class IteratorSpec extends WordSpec with ShouldMatchers {
         override def run() {
           for (i <- 0 until sz) {
             assert(ct.remove(new Wrap(i)) == Some(i))
-            for (i <- 0 until 50) ct.get(new Wrap(i)) // slow down, mate
+            for (i <- 0 until removerslowdown) ct.get(new Wrap(i)) // slow down, mate
           }
+          //println("done removing")
         }
       }
       
@@ -218,7 +220,49 @@ class IteratorSpec extends WordSpec with ShouldMatchers {
         iters.foreach(_.start())
         iters.foreach(_.join())
       }
+      //println("done with iterators")
       remover.join()
+    }
+    
+    "be consistent with a concurrent insertion with a well defined order" in {
+      val sz = 450000
+      val sgroupsize = 40
+      val sgroupnum = 35
+      val inserterslowdown = 50
+      val ct = new ConcurrentTrie[Wrap, Int]
+      
+      class Inserter extends Thread {
+        override def run() {
+          for (i <- 0 until sz) {
+            assert(ct.put(new Wrap(i), i) == None)
+            for (i <- 0 until inserterslowdown) ct.get(new Wrap(i)) // slow down, mate
+          }
+          //println("done inserting")
+        }
+      }
+      
+      def consistentIteration(it: Iterator[(Wrap, Int)]) = {
+        class Iter extends Thread {
+          override def run() {
+            val elems = it.toSeq
+            if (elems.nonEmpty) {
+              val maxelem = elems.maxBy((x: (Wrap, Int)) => x._1.i)._1.i
+              assert(elems.forall(_._1.i <= maxelem))
+            }
+          }
+        }
+        new Iter
+      }
+      
+      val inserter = new Inserter
+      inserter.start()
+      for (_ <- 0 until sgroupnum) {
+        val iters = for (_ <- 0 until sgroupsize) yield consistentIteration(ct.iterator)
+        iters.foreach(_.start())
+        iters.foreach(_.join())
+      }
+      //println("done with iterators")
+      inserter.join()
     }
     
  }
