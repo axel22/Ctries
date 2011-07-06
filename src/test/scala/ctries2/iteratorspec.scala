@@ -265,6 +265,17 @@ class IteratorSpec extends WordSpec with ShouldMatchers {
       inserter.join()
     }
     
- }
+    "work on a yet unevaluated snapshot" in {
+      val sz = 50000
+      val ct = new ConcurrentTrie[Wrap, Int]
+      for (i <- 0 until sz) ct.update(new Wrap(i), i)
+      
+      val snap = ct.snapshot()
+      val it = snap.iterator
+      
+      while (it.hasNext) it.next()
+    }
+    
+  }
   
 }
