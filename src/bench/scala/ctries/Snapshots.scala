@@ -37,6 +37,35 @@ object SingleRemovingCtrie2Snapshot extends Benchmark {
 }
 
 
+object SingleInsertionCtrie2 extends Benchmark {
+  import ctries2.ConcurrentTrie
+  
+  var ct = new ConcurrentTrie[Elem, Elem]
+  
+  override def setUp() {
+    ct = new ConcurrentTrie[Elem, Elem]
+    for (i <- 0 until sz) ct.update(elems(i), elems(i))
+  }
+  
+  def run() {
+    for (i <- 0 until sz) ct.update(elems(i), elems(i))
+  }
+}
+
+
+object SingleInsertionCtrie2Snapshot extends Benchmark {
+  import ctries2.ConcurrentTrie
+  
+  val ct = new ConcurrentTrie[Elem, Elem]
+  for (i <- 0 until sz) ct.update(elems(i), elems(i))
+  
+  def run() {
+    val snap = ct.snapshot()
+    for (i <- 0 until sz) snap.update(elems(i), elems(i))
+  }
+}
+
+
 object MultiRemovingCtrie2 extends Benchmark {
   import ctries2.ConcurrentTrie
   

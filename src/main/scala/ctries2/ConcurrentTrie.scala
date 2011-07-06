@@ -328,8 +328,12 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
                     val pos = Integer.bitCount(bmp & (flag - 1))
                     val sub = cn.array(pos)
                     if (sub eq this) nonlive match {
-                      case null => if (!parent.GCAS(cn, cn.removedAt(pos, flag), ct)) if (ct.root.gen == startgen) contractParent(nonlive)
-                      case sn: SNode[K, V] => if (!parent.GCAS(cn, cn.updatedAt(pos, sn.copyUntombed), ct)) if (ct.root.gen == startgen) contractParent(nonlive)
+                      case null =>
+                        if (!parent.GCAS(cn, cn.removedAt(pos, flag), ct))
+                          if (ct.root.gen == startgen) contractParent(nonlive)
+                      case sn: SNode[K, V] =>
+                        if (!parent.GCAS(cn, cn.updatedAt(pos, sn.copyUntombed), ct))
+                          if (ct.root.gen == startgen) contractParent(nonlive)
                     }
                   }
                 case _ => // parent is no longer a cnode, we're done
