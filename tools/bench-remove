@@ -1,1 +1,3 @@
-sbt 'bench-batch --gnuplot=benchremove -Dpar=1,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32 -Dsz=1000000 ctries.MultiRemoveCtrie2 ctries.MultiRemoveSkipList ctries.MultiRemoveCHM'
+#!/bin/bash
+TASK="bench-batch --gnuplot=$1-remove -Dpar=$2 -Dsz=$3 ctries.MultiRemoveCtrie2 ctries.MultiRemoveSkipList ctries.MultiRemoveCHM"
+sbt "$TASK"

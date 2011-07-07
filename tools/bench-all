@@ -1,0 +1,10 @@
+#!/bin/bash
+
+if [ "$1" == "-h" ]; then
+  echo "Runs all benchmarks. Synthax: bench-all <workstation> <numproc-range> <size-range> <lookups> <inserts> <removes>"
+else
+  tools/bench-insert $@
+  tools/bench-lookup $@
+  tools/bench-remove $@
+  tools/bench-update $@
+fi

@@ -1,1 +1,3 @@
-sbt 'bench-batch --gnuplot=benchinsert -Dpar=1,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32 -Dsz=1000000 ctries.MultiInsertCtrie2 ctries.MultiInsertSkipList ctries.MultiInsertCHM'
+#!/bin/bash
+TASK="bench-batch --gnuplot=$1-insert -Dpar=$2 -Dsz=$3 ctries.MultiInsertCtrie2 ctries.MultiInsertSkipList ctries.MultiInsertCHM"
+sbt "$TASK"
