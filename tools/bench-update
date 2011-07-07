@@ -1,0 +1,1 @@
+sbt 'bench-batch --gnuplot=benchupdate -Dpar=1,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32 -Dsz=1000000 -Dlookups=5 -Dinserts=4 -Dremoves=1 ctries.MultiUpdateCtrie2 ctries.MultiUpdateSkipList ctries.MultiUpdateCHM'

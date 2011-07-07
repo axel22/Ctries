@@ -226,8 +226,8 @@ class IteratorSpec extends WordSpec with ShouldMatchers {
     
     "be consistent with a concurrent insertion with a well defined order" in {
       val sz = 450000
-      val sgroupsize = 40
-      val sgroupnum = 35
+      val sgroupsize = 30
+      val sgroupnum = 30
       val inserterslowdown = 50
       val ct = new ConcurrentTrie[Wrap, Int]
       

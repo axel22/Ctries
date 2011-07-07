@@ -126,7 +126,7 @@ class CtrieSpec extends WordSpec with ShouldMatchers {
     
     def removeNonOverlapping(perthread: Int, nump: Int): ConcurrentTrie[Wrap, Int] = {
       val ct = new ConcurrentTrie[Wrap, Int]
-      val sz = perthread * nump
+      val sz = perthread * (nump max 8)
       for (i <- 0 until sz) ct.update(new Wrap(i), i)
       for (i <- 0 until sz) assert(ct.get(new Wrap(i)) == Some(i))
       

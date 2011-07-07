@@ -92,7 +92,7 @@ object MultiInsertCtrie extends Benchmark {
 }
 
 
-object MultiUpdateCtrie2 extends Benchmark {
+object MultiInsertCtrie2 extends Benchmark {
   def run() {
     val ct = new ctries2.ConcurrentTrie[Elem, Elem]
     val p = par.get
