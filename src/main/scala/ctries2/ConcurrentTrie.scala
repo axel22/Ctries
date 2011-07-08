@@ -861,14 +861,14 @@ object ConcurrentTrie {
 }
 
 
-class CtrieIterator[K, V](ct: ConcurrentTrie[K, V]) extends Iterator[(K, V)] {
+class CtrieIterator[K, V](ct: ConcurrentTrie[K, V], mustInit: Boolean = true) extends Iterator[(K, V)] {
   var stack = new Array[Array[BasicNode]](7)
   var stackpos = new Array[Int](7)
   var depth = -1
   var subiter: Iterator[(K, V)] = null
   var current: SNode[K, V] = null
   
-  initialize()
+  if (mustInit) initialize()
   
   def hasNext = (current ne null) || (subiter ne null)
   
@@ -926,6 +926,34 @@ class CtrieIterator[K, V](ct: ConcurrentTrie[K, V]) extends Iterator[(K, V)] {
       advance()
     }
   } else current = null
+  
+  /** Returns a sequence of iterators over subsets of this iterator.
+   *  It's used to ease the implementation of splitters for a parallel version of the Ctrie.
+   */
+  protected def subdivide: Seq[Iterator[(K, V)]] = if (subiter ne null) {
+    // the case where an LNode is being iterated
+    val it = subiter
+    subiter = null
+    advance()
+    Seq(it, this)
+  } else if (depth == -1) Seq(this) else {
+    var d = 0
+    while (d <= depth) {
+      val rem = stack(d).length - stackpos(d) - 1
+      if (rem > 0) {
+        val (arr1, arr2) = stack(d).drop(stackpos(d) + 1).splitAt((rem + 1) / 2)
+        stack(d) = arr1
+        val it = new CtrieIterator[K, V](ct, false)
+        it.stack(0) = arr2
+        it.stackpos(0) = -1
+        advance()
+        return Seq(this, it)
+      }
+      d += 1
+    }
+    throw new IllegalStateException()
+  }
+  
 }
 
 
