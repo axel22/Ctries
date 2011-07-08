@@ -14,8 +14,12 @@ case class Elem(i: Int) extends Comparable[Elem] {
     // hc * 0x9e3775cd
     
     var hc = i * 0x9e3775cd
-    // hc + (hc << 16) + i
     hc
+    
+    //var hc = i * 0x9e3775cd
+    //hc + (hc << 16) + i
+    
+    //i
   }
 }
 

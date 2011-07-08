@@ -420,7 +420,7 @@ extends BasicNode with ValueNode {
   final def copyTombed = new SNode(k, v, hc, true)
   final def copyUntombed = new SNode(k, v, hc, false)
   final def kvPair = (k, v)
-  final def string(lev: Int) = ("  " * lev) + "SNode(%s, %s, %d, %c)".format(k, v, hc, if (tomb) '!' else '_')
+  final def string(lev: Int) = ("  " * lev) + "SNode(%s, %s, %x, %c)".format(k, v, hc, if (tomb) '!' else '_')
 }
 
 
@@ -767,7 +767,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
     }
   }
   
-  private[ctries2] def string = if (root != null) root.string(0) else "<null>"
+  def string = if (root != null) root.string(0) else "<null>"
   
   /* public methods */
   
