@@ -39,7 +39,7 @@ class Ctries(info: ProjectInfo) extends DefaultProject(info) {
   
   val gplotflag = "--gnuplot"
   
-  val totruns = 15
+  val totruns = 25
   
   def generatePlots(cases: Seq[String], paramtups: List[(String, List[String])], input: String, output: String) = for (((pname, _), i) <- paramtups.zipWithIndex) {
     loginfo("plotting against %s".format(pname))
