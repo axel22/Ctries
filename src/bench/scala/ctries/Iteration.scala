@@ -39,6 +39,32 @@ object IterationCtrie2ReadOnly extends Benchmark {
 }
 
 
+object IterationSkipList extends Benchmark {
+  val csl = new java.util.concurrent.ConcurrentSkipListMap[Elem, Elem]
+  for (i <- 0 until sz) csl.put(elems(i), elems(i))
+  
+  def run() {
+    val it = csl.iterator
+    
+    while (it.hasNext) it.next()
+  }
+  
+}
+
+
+object IterationCHM extends Benchmark {
+  val chm = new java.util.concurrent.ConcurrentHashMap[Elem, Elem]
+  for (i <- 0 until sz) chm.put(elems(i), elems(i))
+  
+  def run() {
+    val it = chm.iterator
+    
+    while (it.hasNext) it.next()
+  }
+  
+}
+
+
 object IterationHashTrie extends Benchmark {
   var ht = collection.immutable.HashMap[Elem, Elem]()
   for (i <- 0 until sz) ht = ht + ((elems(i), elems(i)))
