@@ -17,13 +17,13 @@ while ($line = <HANDLE>) {
     @rawdata = split(' ', $line);
 #    printf("data: @rawdata\n");
     foreach (@rawdata) {
-	if ($num > 1) {
+	if ($num > 3) {
 	    $sum = $sum + $_;
 	}
 	$num = $num + 1;
     }
 #    printf("$num, $sum\n");
-    $avg = 1.0 * $sum / ($num - 2);
+    $avg = 1.0 * $sum / ($num - 4);
     
     print PLOT " $avg ";
 }

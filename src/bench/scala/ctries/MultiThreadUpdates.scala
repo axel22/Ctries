@@ -35,12 +35,14 @@ object MultiUpdateCHM extends Benchmark {
       val e = elems
       val arr = array
       val arrlen = array.length
+      val s = sz
       
       while (i < until) {
+        val imodsz = i % s
         array(i % arrlen) match {
-          case 0 => chm.get(e(i))
-          case 1 => chm.put(e(i), e(i))
-          case 2 => chm.remove(e(i))
+          case 0 => chm.get(e(imodsz))
+          case 1 => chm.put(e(imodsz), e(imodsz))
+          case 2 => chm.remove(e(imodsz))
         }
         
         i += 1
@@ -78,12 +80,14 @@ object MultiUpdateSkipList extends Benchmark {
       val e = elems
       val arr = array
       val arrlen = array.length
+      val s = sz
       
       while (i < until) {
+        val imodsz = i % s
         array(i % arrlen) match {
-          case 0 => csl.get(e(i))
-          case 1 => csl.put(e(i), e(i))
-          case 2 => csl.remove(e(i))
+          case 0 => csl.get(e(imodsz))
+          case 1 => csl.put(e(imodsz), e(imodsz))
+          case 2 => csl.remove(e(imodsz))
         }
         
         i += 1
@@ -126,8 +130,8 @@ object MultiUpdateCtrie2 extends Benchmark {
       while (i < until) {
         val imodsz = i % s
         array(i % arrlen) match {
-          case 0 => ct.get(e(imodsz))
-          case 1 => ct.put(e(imodsz), e(imodsz))
+          case 0 => ct.lookup(e(imodsz))
+          case 1 => ct.update(e(imodsz), e(imodsz))
           case 2 => ct.remove(e(imodsz))
         }
         
