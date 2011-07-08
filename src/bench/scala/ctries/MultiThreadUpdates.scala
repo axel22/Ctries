@@ -121,12 +121,14 @@ object MultiUpdateCtrie2 extends Benchmark {
       val e = elems
       val arr = array
       val arrlen = array.length
+      val s = sz
       
       while (i < until) {
+        val imodsz = i % s
         array(i % arrlen) match {
-          case 0 => ct.get(e(i))
-          case 1 => ct.put(e(i), e(i))
-          case 2 => ct.remove(e(i))
+          case 0 => ct.get(e(imodsz))
+          case 1 => ct.put(e(imodsz), e(imodsz))
+          case 2 => ct.remove(e(imodsz))
         }
         
         i += 1

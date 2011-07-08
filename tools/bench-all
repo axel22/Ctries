@@ -7,4 +7,6 @@ else
   tools/bench-lookup $@
   tools/bench-remove $@
   tools/bench-update $@
+  tools/bench-snapshot $@
+  tools/bench-iter $@
 fi
