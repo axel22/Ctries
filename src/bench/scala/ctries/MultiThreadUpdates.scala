@@ -40,9 +40,9 @@ object MultiUpdateCHM extends Benchmark {
       while (i < until) {
         val imodsz = i % s
         array(i % arrlen) match {
-          case 0 => csl.get(e(imodsz))
-          case 1 => csl.put(e(imodsz), e(imodsz))
-          case 2 => csl.remove(e(imodsz))
+          case 0 => chm.get(e(imodsz))
+          case 1 => chm.put(e(imodsz), e(imodsz))
+          case 2 => chm.remove(e(imodsz))
         }
         
         i += 1
