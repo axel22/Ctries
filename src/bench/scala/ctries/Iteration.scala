@@ -44,7 +44,7 @@ object IterationSkipList extends Benchmark {
   for (i <- 0 until sz) csl.put(elems(i), elems(i))
   
   def run() {
-    val it = csl.iterator
+    val it = csl.entrySet.iterator
     
     while (it.hasNext) it.next()
   }
@@ -57,7 +57,7 @@ object IterationCHM extends Benchmark {
   for (i <- 0 until sz) chm.put(elems(i), elems(i))
   
   def run() {
-    val it = chm.iterator
+    val it = chm.entrySet.iterator
     
     while (it.hasNext) it.next()
   }
