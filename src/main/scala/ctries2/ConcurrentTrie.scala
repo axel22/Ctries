@@ -769,7 +769,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   def string = if (root != null) root.string(0) else "<null>"
   
-  private def cacheSizes(in: INode[K, V]): Int = {
+  protected def cacheSizes(in: INode[K, V]): Int = {
     val m = in.GCAS_READ(this)
     m match {
       case cn: CNode[K, V] if cn.cachedsize != -1 => cn.cachedsize
