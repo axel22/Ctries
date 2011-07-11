@@ -769,11 +769,37 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   def string = if (root != null) root.string(0) else "<null>"
   
+  private def cacheSizes(in: INode[K, V]): Int = {
+    val m = in.GCAS_READ(this)
+    m match {
+      case cn: CNode[K, V] if cn.cachedsize != -1 => cn.cachedsize
+      case sn: SNode[K, V] => 1
+      case ln: LNode[K, V] => ln.listmap.size
+      case cn: CNode[K, V] =>
+        var i = 0
+        var total = 0
+        while (i < cn.array.length) {
+          cn.array(i) match {
+            case sn: SNode[K, V] => total += 1
+            case nd: INode[K, V] => total += cacheSizes(nd)
+          }
+          i += 1
+        }
+        cn.cachedsize = total
+        total
+    }
+  }
+  
   /* public methods */
   
   @inline final def isReadOnly = rootupdater eq null
   
   @inline final def nonReadOnly = rootupdater ne null
+  
+  final def cacheSizes() {
+    assert(isReadOnly)
+    cacheSizes(/*READ*/root)
+  }
   
   @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
     val r = /*READ*/root
