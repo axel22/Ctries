@@ -937,7 +937,7 @@ class CtrieIterator[K, V](ct: ConcurrentTrie[K, V], mustInit: Boolean = true) ex
     readin(r)
   }
   
-  private def advance(): Unit = if (depth >= 0) {
+  def advance(): Unit = if (depth >= 0) {
     val npos = stackpos(depth) + 1
     if (npos < stack(depth).length) {
       stackpos(depth) = npos
@@ -965,19 +965,29 @@ class CtrieIterator[K, V](ct: ConcurrentTrie[K, V], mustInit: Boolean = true) ex
   } else if (depth == -1) Seq(this) else {
     var d = 0
     while (d <= depth) {
-      val rem = stack(d).length - stackpos(d) - 1
+      val rem = stack(d).length - 1 - stackpos(d)
       if (rem > 0) {
-        val (arr1, arr2) = stack(d).drop(stackpos(d) + 1).splitAt((rem + 1) / 2)
+        val (arr1, arr2) = stack(d).drop(stackpos(d) + 1).splitAt(rem / 2)
         stack(d) = arr1
+        stackpos(d) = -1
         val it = new CtrieIterator[K, V](ct, false)
         it.stack(0) = arr2
         it.stackpos(0) = -1
-        advance()
+        it.depth = 0
+        it.advance() // <-- fix it
         return Seq(this, it)
       }
       d += 1
     }
-    throw new IllegalStateException()
+    Seq(this)
+  }
+  
+  private def print {
+    println("ctrie iterator")
+    println(stackpos.mkString(","))
+    println("depth: " + depth)
+    println("curr.: " + current)
+    println(stack.mkString("\n"))
   }
   
 }
