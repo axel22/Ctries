@@ -66,7 +66,7 @@ case class Page(name: Int, linksnum: Int, var outgoing: Array[Int], var incoming
 object Page {
   val rand = new util.Random(324132L)
   
-  // most links to middle pages
+  // creates a set of pages with most links to middle pages
   def middlePages(sz: Int) = {
     val pages = (for (i <- 0 until sz) yield {
       val linknum = rand.nextInt(8)
@@ -92,7 +92,7 @@ object PageRank extends Benchmark {
   val pages = Page.middlePages(sz)
   val prob1 = new Array[Double](sz)
   val prob2 = new Array[Double](sz)
-  var pct: ParCtrie[Int, Int] = null
+  var pct: ParCtrie[Int, Page] = null
     
   println("Page set constructed.")
   
@@ -100,11 +100,25 @@ object PageRank extends Benchmark {
     val in = 1.0 / sz
     for (i <- 0 until sz) prob1(i) = in
     for (i <- 0 until sz) prob2(i) = in
-    pct = new ParCtrie[Int, Int](1 << 20)
-    for (i <- 0 until sz) pct.put(i, i)
+    pct = new ParCtrie[Int, Page](1 << 20)
+    for (i <- 0 until sz) pct.put(i, pages(i))
   }
   
   def run() {
-    for (kv <- pct) num.getAndIncrement()
+    for ((name, page) <- pct) {
+      
+    }
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
