@@ -289,9 +289,12 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
             case sn: SNode[K, V] =>
               //assert(!sn.tomb)
               if (sn.hc == hc && sn.k == k && (v == null || sn.v == v)) {
-                var ncn: CNode[K, V] = null
-                if (cn.array.length > 1) ncn = cn.removedAt(pos, flag)
-                if (GCAS(cn, ncn, ct)) Some(sn.v) else null
+                val ncn: CNode[K, V] = cn.removedAt(pos, flag)
+                val compressed = if (ncn.array.length == 1 && (parent ne null)) ncn.array(0) match {
+                  case sn: SNode[K, V] => sn.copyTombed
+                  case _ => ncn
+                } else ncn
+                if (GCAS(cn, compressed, ct)) Some(sn.v) else null
               } else None
           }
           
