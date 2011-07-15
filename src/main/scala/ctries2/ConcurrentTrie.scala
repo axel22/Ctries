@@ -126,10 +126,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
         }
       case sn: SNode[K, V] =>
         //assert(sn.tomb)
-        clean(parent, ct)
-        false
-      case null => // 2) a null-i-node, fix and retry
-        if (parent ne null) clean(parent, ct)
+        clean(parent, ct, lev - 5)
         false
       case ln: LNode[K, V] => // 3) an l-node
         val nn = ln.inserted(k, v)
@@ -189,10 +186,7 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
           case otherv: V => None
         }
       case sn: SNode[K, V] =>
-        clean(parent, ct)
-        null
-      case null => // 2) a null-i-node, fix and retry
-        if (parent ne null) clean(parent, ct)
+        clean(parent, ct, lev - 5)
         null
       case ln: LNode[K, V] => // 3) an l-node
         @inline def insertln() = {
@@ -249,19 +243,13 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
         }
       case sn: SNode[K, V] => // 3) non-live node
         def cleanReadOnly(sn: SNode[K, V]) = if (ct.nonReadOnly) {
-          clean(parent, ct)
+          clean(parent, ct, lev - 5)
           throw RestartException
         } else {
           if (sn.hc == hc && sn.k == k) sn.v.asInstanceOf[AnyRef]
           else null
         }
         cleanReadOnly(sn)
-      case null  => // 4) a null-i-node
-        def cleanReadOnly() = if (ct.nonReadOnly) {
-          if (parent ne null) clean(parent, ct)
-          throw RestartException
-        } else null
-        cleanReadOnly()
       case ln: LNode[K, V] => // 5) an l-node
         ln.get(k).asInstanceOf[Option[AnyRef]].orNull
     }
@@ -289,36 +277,13 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
             case sn: SNode[K, V] =>
               //assert(!sn.tomb)
               if (sn.hc == hc && sn.k == k && (v == null || sn.v == v)) {
-                val ncn: CNode[K, V] = cn.removedAt(pos, flag)
-                val compressed = if (ncn.array.length == 1 && (parent ne null)) ncn.array(0) match {
-                  case sn: SNode[K, V] => sn.copyTombed
-                  case _ => ncn
-                } else ncn
-                if (GCAS(cn, compressed, ct)) Some(sn.v) else null
+                val ncn = cn.removedAt(pos, flag).toContracted(lev)
+                if (GCAS(cn, ncn, ct)) Some(sn.v) else null
               } else None
           }
           
           if (res == None || (res eq null)) res
           else {
-            // tomb-compress
-            @tailrec def tombCompress(): Boolean = {
-              val m = GCAS_READ(ct)
-              m match {
-                case cn: CNode[K, V] =>
-                  val tcn: BasicNode = cn.toWeakTombedCompressed(ct)
-                  if (tcn eq cn) false // we're done, no further compression needed
-                  else if (GCAS(cn, tcn, ct)) tcn match {
-                    case null => true // parent contraction needed
-                    case sn: SNode[K, V] => true // parent contraction needed
-                    case _ => false // nothing to contract, we're done
-                  } else {
-                    if (ct.root.gen == startgen) tombCompress()
-                    else false
-                  }
-                case _ => false // we're done, no further compression needed
-              }
-            }
-            
             @tailrec def contractParent(nonlive: AnyRef) {
               val pm = parent.GCAS_READ(ct)
               pm match {
@@ -331,11 +296,9 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
                     val pos = Integer.bitCount(bmp & (flag - 1))
                     val sub = cn.array(pos)
                     if (sub eq this) nonlive match {
-                      case null =>
-                        if (!parent.GCAS(cn, cn.removedAt(pos, flag), ct))
-                          if (ct.root.gen == startgen) contractParent(nonlive)
                       case sn: SNode[K, V] =>
-                        if (!parent.GCAS(cn, cn.updatedAt(pos, sn.copyUntombed), ct))
+                        val ncn = cn.updatedAt(pos, sn.copyUntombed).toContracted(lev - 5)
+                        if (!parent.GCAS(cn, ncn, ct))
                           if (ct.root.gen == startgen) contractParent(nonlive)
                     }
                   }
@@ -344,18 +307,15 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
             }
             
             if (parent ne null) { // never tomb at root
-              if (tombCompress()) contractParent(GCAS_READ(ct)) // note: this inode is non-live in the 'if' body
-            } //else clean(this) // clean root
+              if (GCAS_READ(ct).isInstanceOf[SNode[_, _]])
+                contractParent(GCAS_READ(ct))
+            }
             
             res
           }
         }
       case sn: SNode[K, V] =>
-        //assert(sn.tomb)
-        clean(parent, ct)
-        null
-      case null =>
-        if (parent ne null) clean(parent, ct)
+        clean(parent, ct, lev - 5)
         null
       case ln: LNode[K, V] =>
         if (v == null) {
@@ -371,10 +331,10 @@ final class INode[K, V](g: Gen) extends INodeBase(g) {
     }
   }
   
-  private def clean(nd: INode[K, V], ct: ConcurrentTrie[K, V]) {
+  private def clean(nd: INode[K, V], ct: ConcurrentTrie[K, V], lev: Int) {
     val m = nd.GCAS_READ(ct)
     m match {
-      case cn: CNode[K, V] => nd.GCAS(cn, cn.toCompressed(ct), ct)
+      case cn: CNode[K, V] => nd.GCAS(cn, cn.toCompressed(ct, lev), ct)
       case _ =>
     }
   }
@@ -516,142 +476,40 @@ extends CNodeBase[K, V] with ValueNode {
   }
   */
   
+  final def toContracted(lev: Int) = if (array.length == 1 && lev > 0) array(0) match {
+    case sn: SNode[K, V] => sn.copyTombed
+    case _ => this
+  } else this
+  
   // - if the branching factor is 1 for this CNode, and the child
   //   is a tombed SNode, returns its tombed version
   // - otherwise, if there is at least one non-null node below,
   //   returns the version of this node with at least some null-inodes
   //   removed (those existing when the op began)
   // - if there are only null-i-nodes below, returns null
-  final def toCompressed(ct: ConcurrentTrie[K, V]) = {
+  final def toCompressed(ct: ConcurrentTrie[K, V], lev: Int) = {
     var bmp = bitmap
     val maxsubnodes = Integer.bitCount(bmp) // !!!this ensures lock-freedom!!!
-    if (maxsubnodes == 1 && isTombed(array(0), ct)) extractSNode(array(0), ct).copyTombed
+    if (maxsubnodes == 1 && lev > 0 && isTombed(array(0), ct)) extractSNode(array(0), ct).copyTombed
     else {
-      var nbmp = 0
       var i = 0
       val arr = array
-      var nsz = 0
       val tmparray = new Array[BasicNode](arr.length)
-      while (bmp != 0) { // construct new bitmap
-        val lsb = bmp & (-bmp)
+      while (i < arr.length) { // construct new bitmap
         val sub = arr(i)
         sub match {
           case in: INode[K, V] =>
             val inodemain = in.GCAS_READ(ct)
-            if (inodemain ne null) {
-              nbmp |= lsb
-              tmparray(nsz) = resurrect(in, inodemain)
-              nsz += 1
-            }
+            assert(inodemain ne null)
+            tmparray(i) = resurrect(in, inodemain)
           case sn: SNode[K, V] =>
-            //assert(!sn.tomb)
-            nbmp |= lsb
-            tmparray(nsz) = sn
-            nsz += 1
+            tmparray(i) = sn
         }
-        bmp ^= lsb
         i += 1
       }
       
-      if (nsz > 0) {
-        val narr = new Array[BasicNode](nsz)
-        Array.copy(tmparray, 0, narr, 0, nsz)
-        new CNode(nbmp, narr)
-      } else null
+      new CNode(bmp, tmparray).toContracted(lev)
     }
-  }
-  
-  // - returns a tombed singleton iff 
-  //   there is only a single singleton below, tombed or live
-  // - returns null iff there are no non-null i-nodes below
-  // - otherwise returns a copy of this node such that
-  //   all null-i-nodes present when the op began are removed
-  // - or this node if there are no null i-nodes below
-  //   but more than a single singleton
-  final def toTombedCompressed(ct: ConcurrentTrie[K, V]): BasicNode = {
-    val arr = array
-    val len = arr.length
-    val tmparr = new Array[BasicNode](len)
-    var lastsn: SNode[K, V] = null
-    var total = 0
-    var nulls = 0
-    var i = 0
-    var bmp = bitmap
-    var nbmp = 0
-    while (i < len) {
-      val sub = arr(i)
-      val lsb = bmp & (-bmp)
-      bmp ^= lsb
-      nbmp |= lsb
-      if (sub ne null) {
-        tmparr(total) = sub
-        total += 1
-        sub match {
-          case sn: SNode[K, V] => lastsn = sn
-          case in: INode[K, V] =>
-            val m = /*READ*/in.GCAS_READ(ct)
-            m match {
-              case sn: SNode[K, V] => lastsn = sn
-              case _ => // do nothing
-            }
-        }
-      } else nulls += 1
-      i += 1
-    }
-    
-    if (total == 0) null
-    else if (total == 1 && lastsn != null) lastsn.copyTombed
-    else if (nulls > 0) {
-      val narr = new Array[BasicNode](total)
-      Array.copy(tmparr, 0, narr, 0, total)
-      new CNode(nbmp, narr)
-    } else this
-  }
-  
-  // - returns a tombed singleton iff 
-  //   there is only a single singleton below, tombed or live
-  // - returns null iff there are no non-null i-nodes below
-  // - returns this node if there is more than a single branch
-  //   (even if there are null-i-nodes below - they will not be removed)
-  // - otherwise returns a copy of this node such that
-  //   all null-i-nodes present when the op began are removed
-  final def toWeakTombedCompressed(ct: ConcurrentTrie[K, V]): BasicNode = {
-    val arr = array
-    val len = arr.length
-    var lastsub: BasicNode = null
-    var lastsn: SNode[K, V] = null
-    var nulls = 0
-    var i = 0
-    var bmp = bitmap
-    var nbmp = 0
-    while (i < len) {
-      val sub = arr(i)
-      val lsb = bmp & (-bmp)
-      bmp ^= lsb
-      nbmp |= lsb
-      if (sub ne null) {
-        if (lastsub ne null) return this
-        lastsub = sub
-        sub match {
-          case sn: SNode[K, V] => lastsn = sn
-          case in: INode[K, V] =>
-            val m = /*READ*/in.GCAS_READ(ct)
-            m match {
-              case sn: SNode[K, V] => lastsn = sn
-              case _ => // do nothing
-            }
-        }
-      } else nulls += 1
-      i += 1
-    }
-    
-    if (lastsub eq null) null
-    else if (lastsn ne null) lastsn.copyTombed
-    else if (nulls > 0) {
-      val narr = new Array[BasicNode](1)
-      narr(0) = lastsub
-      new CNode(nbmp, narr)
-    } else this
   }
   
   private[ctries2] def string(lev: Int): String = "CNode %x\n%s".format(bitmap, array.map(_.string(lev + 1)).mkString("\n"))
