@@ -266,7 +266,7 @@ final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
           
           if (res == None || (res eq null)) res
           else {
-            @tailrec def contractParent(nonlive: AnyRef) {
+            @tailrec def cleanParent(nonlive: AnyRef) {
               val pm = parent.GCAS_READ(ct)
               pm match {
                 case cn: CNode[K, V] =>
@@ -281,7 +281,7 @@ final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
                       case tn: TNode[K, V] =>
                         val ncn = cn.updatedAt(pos, tn.copyUntombed).toContracted(lev - 5)
                         if (!parent.GCAS(cn, ncn, ct))
-                          if (ct.root.gen == startgen) contractParent(nonlive)
+                          if (ct.root.gen == startgen) cleanParent(nonlive)
                     }
                   }
                 case _ => // parent is no longer a cnode, we're done
@@ -289,8 +289,9 @@ final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
             }
             
             if (parent ne null) { // never tomb at root
-              if (GCAS_READ(ct).isInstanceOf[TNode[_, _]])
-                contractParent(GCAS_READ(ct))
+              val n = GCAS_READ(ct)
+              if (n.isInstanceOf[TNode[_, _]])
+                cleanParent(n)
             }
             
             res
@@ -493,27 +494,23 @@ extends CNodeBase[K, V] with ValueNode {
   // - if there are only null-i-nodes below, returns null
   final def toCompressed(ct: ConcurrentTrie[K, V], lev: Int) = {
     var bmp = bitmap
-    val maxsubnodes = Integer.bitCount(bmp) // !!!this ensures lock-freedom!!!
-    if (maxsubnodes == 1 && lev > 0 && isTombed(array(0), ct)) extractTNode(array(0), ct).copyTombed
-    else {
-      var i = 0
-      val arr = array
-      val tmparray = new Array[BasicNode](arr.length)
-      while (i < arr.length) { // construct new bitmap
-        val sub = arr(i)
-        sub match {
-          case in: INode[K, V] =>
-            val inodemain = in.GCAS_READ(ct)
-            assert(inodemain ne null)
-            tmparray(i) = resurrect(in, inodemain)
-          case sn: SNode[K, V] =>
-            tmparray(i) = sn
-        }
-        i += 1
+    var i = 0
+    val arr = array
+    val tmparray = new Array[BasicNode](arr.length)
+    while (i < arr.length) { // construct new bitmap
+      val sub = arr(i)
+      sub match {
+        case in: INode[K, V] =>
+          val inodemain = in.GCAS_READ(ct)
+          assert(inodemain ne null)
+          tmparray(i) = resurrect(in, inodemain)
+        case sn: SNode[K, V] =>
+          tmparray(i) = sn
       }
-      
-      new CNode(bmp, tmparray).toContracted(lev)
+      i += 1
     }
+    
+    new CNode(bmp, tmparray).toContracted(lev)
   }
   
   private[ctries2] def string(lev: Int): String = "CNode %x\n%s".format(bitmap, array.map(_.string(lev + 1)).mkString("\n"))
