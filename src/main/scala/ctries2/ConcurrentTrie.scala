@@ -61,8 +61,10 @@ final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
   
   @inline final def GCAS(old: BasicNode, n: BasicNode, ct: ConcurrentTrie[K, V]): Boolean = {
     /*WRITE*/n.prev = old
-    if (CAS(old, n)) GCAS_COMPLETE(n, ct) eq n
-    else false
+    if (CAS(old, n)) {
+      GCAS_COMPLETE(n, ct)
+      /*READ*/n.prev eq null
+    } else false
   }
   
   @inline private def inode(cn: BasicNode) = {
