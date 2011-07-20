@@ -11,34 +11,34 @@ import annotation.switch
 
 
 
-final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
+final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
   import INodeBase._
   
   mainnode = bn
   
   def this(g: Gen) = this(null, g)
   
-  @inline final def CAS(old: BasicNode, n: BasicNode) = INodeBase.updater.compareAndSet(this, old, n)
+  @inline final def CAS(old: MainNode[K, V], n: MainNode[K, V]) = INodeBase.updater.compareAndSet(this, old, n)
   
-  @inline final def GCAS_READ(ct: ConcurrentTrie[K, V]): BasicNode = {
+  @inline final def GCAS_READ(ct: ConcurrentTrie[K, V]): MainNode[K, V] = {
     val m = /*READ*/mainnode
     val prevval = /*READ*/m.prev
     if (prevval eq null) m
     else GCAS_COMPLETE(m, ct)
   }
   
-  @tailrec private def GCAS_COMPLETE(m: BasicNode, ct: ConcurrentTrie[K, V]): BasicNode = if (m eq null) null else {
+  @tailrec private def GCAS_COMPLETE(m: MainNode[K, V], ct: ConcurrentTrie[K, V]): MainNode[K, V] = if (m eq null) null else {
     // complete the GCAS
     val prev = /*READ*/m.prev
-    val ctr = /*READ*/ct.root
+    val ctr = ct.READ_ROOT(true)
     
     prev match {
       case null =>
         m
-      case fn: FailedNode => // try to commit to previous value
+      case fn: FailedNode[_, _] => // try to commit to previous value
         if (CAS(m, fn.prev)) fn.prev
         else GCAS_COMPLETE(/*READ*/mainnode, ct)
-      case vn: ValueNode =>
+      case vn: MainNode[_, _] =>
         // Assume that you've read the root from the generation G.
         // Assume that the snapshot algorithm is correct.
         // ==> you can only reach nodes in generations <= G.
@@ -59,7 +59,7 @@ final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
     }
   }
   
-  @inline final def GCAS(old: BasicNode, n: BasicNode, ct: ConcurrentTrie[K, V]): Boolean = {
+  @inline final def GCAS(old: MainNode[K, V], n: MainNode[K, V], ct: ConcurrentTrie[K, V]): Boolean = {
     /*WRITE*/n.prev = old
     if (CAS(old, n)) {
       GCAS_COMPLETE(n, ct)
@@ -67,7 +67,7 @@ final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
     } else false
   }
   
-  @inline private def inode(cn: BasicNode) = {
+  @inline private def inode(cn: MainNode[K, V]) = {
     val nin = new INode[K, V](gen)
     /*WRITE*/nin.mainnode = cn
     nin
@@ -283,7 +283,7 @@ final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
                       case tn: TNode[K, V] =>
                         val ncn = cn.updatedAt(pos, tn.copyUntombed).toContracted(lev - 5)
                         if (!parent.GCAS(cn, ncn, ct))
-                          if (ct.root.gen == startgen) cleanParent(nonlive)
+                          if (ct.READ_ROOT().gen == startgen) cleanParent(nonlive)
                     }
                   }
                 case _ => // parent is no longer a cnode, we're done
@@ -329,7 +329,6 @@ final class INode[K, V](bn: BasicNode, g: Gen) extends INodeBase(g) {
   /* this is a quiescent method! */
   def string(lev: Int) = "%sINode -> %s".format("  " * lev, mainnode match {
     case null => "<null>"
-    case sn: SNode[_, _] => "SNode(%s, %s, %d)".format(sn.k, sn.v, sn.hc)
     case tn: TNode[_, _] => "TNode(%s, %s, %d, !)".format(tn.k, tn.v, tn.hc)
     case cn: CNode[_, _] => cn.string(lev)
     case ln: LNode[_, _] => ln.string(lev)
@@ -350,7 +349,7 @@ object INode {
 }
 
 
-final class FailedNode(p: BasicNode) extends BasicNode {
+final class FailedNode[K, V](p: MainNode[K, V]) extends MainNode[K, V] {
   prev = p
   
   def string(lev: Int) = throw new UnsupportedOperationException
@@ -376,7 +375,7 @@ trait KVNode[K, V] {
 
 
 final class SNode[K, V](final val k: K, final val v: V, final val hc: Int)
-extends BasicNode with ValueNode with KVNode[K, V] {
+extends BasicNode with KVNode[K, V] {
   final def copy = new SNode(k, v, hc)
   final def copyTombed = new TNode(k, v, hc)
   final def copyUntombed = new SNode(k, v, hc)
@@ -386,7 +385,7 @@ extends BasicNode with ValueNode with KVNode[K, V] {
 
 
 final class TNode[K, V](final val k: K, final val v: V, final val hc: Int)
-extends BasicNode with ValueNode with KVNode[K, V] {
+extends MainNode[K, V] with KVNode[K, V] {
   final def copy = new TNode(k, v, hc)
   final def copyTombed = new TNode(k, v, hc)
   final def copyUntombed = new SNode(k, v, hc)
@@ -396,7 +395,7 @@ extends BasicNode with ValueNode with KVNode[K, V] {
 
 
 final class LNode[K, V](final val listmap: ListMap[K, V])
-extends BasicNode with ValueNode {
+extends MainNode[K, V] {
   def this(k: K, v: V) = this(ListMap(k -> v))
   def this(k1: K, v1: V, k2: K, v2: V) = this(ListMap(k1 -> v1, k2 -> v2))
   def inserted(k: K, v: V) = new LNode(listmap + ((k, v)))
@@ -414,7 +413,7 @@ extends BasicNode with ValueNode {
 
 
 final class CNode[K, V](bmp0: Int, a0: Array[BasicNode])
-extends CNodeBase[K, V] with ValueNode {
+extends CNodeBase[K, V] {
   bitmap = bmp0
   array = a0
   
@@ -450,7 +449,7 @@ extends CNodeBase[K, V] with ValueNode {
       }
       i += 1
     }
-    new CNode(bitmap, narr)
+    new CNode[K, V](bitmap, narr)
   }
   
   private def resurrect(inode: INode[K, V], inodemain: AnyRef) = inodemain match {
@@ -471,17 +470,6 @@ extends CNodeBase[K, V] with ValueNode {
     }
     case _ => false
   }
-  
-  /* unused
-  private def isSingleton(bn: BasicNode) = bn match {
-    case in: INode[K, V] => in.mainnode match {
-      case sn: SNode[K, V] if sn.tomb => true
-      case _ => false
-    }
-    case sn: SNode[K, V] => true
-    case _ => false
-  }
-  */
   
   final def toContracted(lev: Int) = if (array.length == 1 && lev > 0) array(0) match {
     case sn: SNode[K, V] => sn.copyTombed
@@ -512,7 +500,7 @@ extends CNodeBase[K, V] with ValueNode {
       i += 1
     }
     
-    new CNode(bmp, tmparray).toContracted(lev)
+    new CNode[K, V](bmp, tmparray).toContracted(lev)
   }
   
   private[ctries2] def string(lev: Int): String = "CNode %x\n%s".format(bitmap, array.map(_.string(lev + 1)).mkString("\n"))
@@ -528,7 +516,7 @@ object CNode {
     new CNode(flag, arr)
   }
   
-  def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int, gen: Gen): BasicNode = if (lev < 35) {
+  def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int, gen: Gen): MainNode[K, V] = if (lev < 35) {
     val xidx = (xhc >>> lev) & 0x1f
     val yidx = (yhc >>> lev) & 0x1f
     val bmp = (1 << xidx) | (1 << yidx)
@@ -541,13 +529,17 @@ object CNode {
       else new CNode(bmp, Array(y, x))
     }
   } else {
-    // sys.error("list nodes not supported yet, lev=%d; %s, %s".format(lev, x.string(lev), y.string(lev)))
     new LNode(x.k, x.v, y.k, y.v)
   }
 }
 
 
-class ConcurrentTrie[K, V] private (r: INode[K, V], rtupd: AtomicReferenceFieldUpdater[ConcurrentTrieBase[K, V], INode[K, V]])
+case class RDCSS_Descriptor[K, V](old: INode[K, V], expectedmain: MainNode[K, V], nv: INode[K, V]) {
+  @volatile var committed = false
+}
+
+
+class ConcurrentTrie[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater[ConcurrentTrieBase[K, V], AnyRef])
 extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   private val rootupdater = rtupd
   
@@ -555,24 +547,64 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   def this() = this(
     INode.newRootNode,
-    AtomicReferenceFieldUpdater.newUpdater(classOf[ConcurrentTrieBase[K, V]], classOf[INode[K, V]], "root")
+    AtomicReferenceFieldUpdater.newUpdater(classOf[ConcurrentTrieBase[K, V]], classOf[AnyRef], "root")
   )
   
   /* internal methods */
   
-  @inline private def CAS_ROOT(ov: INode[K, V], nv: INode[K, V]) = rootupdater.compareAndSet(this, ov, nv)
+  @inline final def CAS_ROOT(ov: AnyRef, nv: AnyRef) = rootupdater.compareAndSet(this, ov, nv)
+  
+  @inline final def READ_ROOT(abort: Boolean = false): INode[K, V] = {
+    val r = /*READ*/root
+    r match {
+      case in: INode[K, V] => in
+      case desc: RDCSS_Descriptor[K, V] => RDCSS_Complete(abort)
+    }
+  }
+  
+  @tailrec private def RDCSS_Complete(abort: Boolean): INode[K, V] = {
+    val v = /*READ*/root
+    v match {
+      case in: INode[K, V] => in
+      case desc: RDCSS_Descriptor[K, V] =>
+        val RDCSS_Descriptor(ov, exp, nv) = desc
+        if (abort) {
+          if (CAS_ROOT(desc, ov)) ov
+          else RDCSS_Complete(abort)
+        } else {
+          val oldmain = ov.GCAS_READ(this)
+          if (oldmain eq exp) {
+            if (CAS_ROOT(desc, nv)) {
+              desc.committed = true
+              nv
+            } else RDCSS_Complete(abort)
+          } else {
+            if (CAS_ROOT(desc, ov)) ov
+            else RDCSS_Complete(abort)
+          }
+        }
+    }
+  }
+  
+  private def RDCSS_ROOT(ov: INode[K, V], expectedmain: MainNode[K, V], nv: INode[K, V]): Boolean = {
+    val desc = RDCSS_Descriptor(ov, expectedmain, nv)
+    if (CAS_ROOT(ov, desc)) {
+      RDCSS_Complete(false)
+      /*READ*/desc.committed
+    } else false
+  }
   
   @inline private def computeHash(k: K): Int = {
     k.hashCode
   }
   
   @tailrec private def inserthc(k: K, hc: Int, v: V) {
-    val r = /*READ*/root
+    val r = READ_ROOT()
     if (!r.rec_insert(k, v, hc, 0, null, r.gen, this)) inserthc(k, hc, v)
   }
   
   @tailrec private def insertifhc(k: K, hc: Int, v: V, cond: AnyRef): Option[V] = {
-    val r = /*READ*/root
+    val r = READ_ROOT()
     
     val ret = r.rec_insertif(k, v, hc, cond, 0, null, r.gen, this)
     if (ret eq null) insertifhc(k, hc, v, cond)
@@ -581,7 +613,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   /*
   @tailrec private def lookuphc(k: K, hc: Int): AnyRef = {
-    val r = /*READ*/root
+    val r = READ_ROOT()
     if (r eq null) null
     else {
       val res = r.rec_lookup(k, hc, 0, null)
@@ -596,7 +628,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   //@tailrec
   private def lookuphc(k: K, hc: Int): AnyRef = {
-    val r = /*READ*/root
+    val r = READ_ROOT()
     try {
       r.rec_lookup(k, hc, 0, null, r.gen, this)
     } catch {
@@ -606,15 +638,16 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   }
   
   @tailrec private def removehc(k: K, v: V, hc: Int): Option[V] = {
-    val r = /*READ*/root
+    val r = READ_ROOT()
     val res = r.rec_remove(k, v, hc, 0, null, r.gen, this)
     if (res ne null) res
     else removehc(k, v, hc)
   }
   
-  def string = if (root != null) root.string(0) else "<null>"
+  def string = READ_ROOT().string(0)
   
   // TODO work on this
+  /*
   protected def cacheSizes(in: INode[K, V]): Int = {
     val m = in.GCAS_READ(this)
     m match {
@@ -635,6 +668,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
         total
     }
   }
+  */
   
   /* public methods */
   
@@ -642,20 +676,20 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   @inline final def nonReadOnly = rootupdater ne null
   
-  final def cacheSizes() {
+  /*final def cacheSizes() {
     assert(isReadOnly)
     cacheSizes(/*READ*/root)
-  }
+  }*/
   
   @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
-    val r = /*READ*/root
-    if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this), rootupdater)
+    val r = READ_ROOT()
+    if (RDCSS_ROOT(r, r.GCAS_READ(this), r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this), rootupdater)
     else snapshot()
   }
   
   @tailrec final def readOnlySnapshot(): Map[K, V] = {
-    val r = /*READ*/root
-    if (CAS_ROOT(r, r.copy(new Gen, this))) new ConcurrentTrie(r, null)
+    val r = READ_ROOT()
+    if (RDCSS_ROOT(r, r.GCAS_READ(this), r.copy(new Gen, this))) new ConcurrentTrie(r, null)
     else readOnlySnapshot()
   }
   
@@ -729,7 +763,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
 
 
 object ConcurrentTrie {
-  val inodeupdater = AtomicReferenceFieldUpdater.newUpdater(classOf[INodeBase], classOf[AnyRef], "mainnode")
+  val inodeupdater = AtomicReferenceFieldUpdater.newUpdater(classOf[INodeBase[_, _]], classOf[AnyRef], "mainnode")
 }
 
 
@@ -779,7 +813,7 @@ class CtrieIterator[K, V](ct: ConcurrentTrie[K, V], mustInit: Boolean = true) ex
   @inline private def initialize() {
     assert(ct.isReadOnly)
     
-    val r = /*READ*/ct.root
+    val r = ct.READ_ROOT()
     readin(r)
   }
   
