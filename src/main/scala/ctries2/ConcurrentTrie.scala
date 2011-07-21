@@ -30,7 +30,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
   @tailrec private def GCAS_COMPLETE(m: MainNode[K, V], ct: ConcurrentTrie[K, V]): MainNode[K, V] = if (m eq null) null else {
     // complete the GCAS
     val prev = /*READ*/m.prev
-    val ctr = ct.READ_ROOT(true)
+    val ctr = ct.RDCSS_READ_ROOT(true)
     
     prev match {
       case null =>
@@ -283,7 +283,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
                       case tn: TNode[K, V] =>
                         val ncn = cn.updatedAt(pos, tn.copyUntombed).toContracted(lev - 5)
                         if (!parent.GCAS(cn, ncn, ct))
-                          if (ct.READ_ROOT().gen == startgen) cleanParent(nonlive)
+                          if (ct.RDCSS_READ_ROOT().gen == startgen) cleanParent(nonlive)
                     }
                   }
                 case _ => // parent is no longer a cnode, we're done
@@ -554,7 +554,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   @inline final def CAS_ROOT(ov: AnyRef, nv: AnyRef) = rootupdater.compareAndSet(this, ov, nv)
   
-  @inline final def READ_ROOT(abort: Boolean = false): INode[K, V] = {
+  @inline final def RDCSS_READ_ROOT(abort: Boolean = false): INode[K, V] = {
     val r = /*READ*/root
     r match {
       case in: INode[K, V] => in
@@ -599,12 +599,12 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   }
   
   @tailrec private def inserthc(k: K, hc: Int, v: V) {
-    val r = READ_ROOT()
+    val r = RDCSS_READ_ROOT()
     if (!r.rec_insert(k, v, hc, 0, null, r.gen, this)) inserthc(k, hc, v)
   }
   
   @tailrec private def insertifhc(k: K, hc: Int, v: V, cond: AnyRef): Option[V] = {
-    val r = READ_ROOT()
+    val r = RDCSS_READ_ROOT()
     
     val ret = r.rec_insertif(k, v, hc, cond, 0, null, r.gen, this)
     if (ret eq null) insertifhc(k, hc, v, cond)
@@ -613,7 +613,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   /*
   @tailrec private def lookuphc(k: K, hc: Int): AnyRef = {
-    val r = READ_ROOT()
+    val r = RDCSS_READ_ROOT()
     if (r eq null) null
     else {
       val res = r.rec_lookup(k, hc, 0, null)
@@ -628,7 +628,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   //@tailrec
   private def lookuphc(k: K, hc: Int): AnyRef = {
-    val r = READ_ROOT()
+    val r = RDCSS_READ_ROOT()
     try {
       r.rec_lookup(k, hc, 0, null, r.gen, this)
     } catch {
@@ -638,13 +638,13 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   }
   
   @tailrec private def removehc(k: K, v: V, hc: Int): Option[V] = {
-    val r = READ_ROOT()
+    val r = RDCSS_READ_ROOT()
     val res = r.rec_remove(k, v, hc, 0, null, r.gen, this)
     if (res ne null) res
     else removehc(k, v, hc)
   }
   
-  def string = READ_ROOT().string(0)
+  def string = RDCSS_READ_ROOT().string(0)
   
   // TODO work on this
   /*
@@ -682,15 +682,20 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   }*/
   
   @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
-    val r = READ_ROOT()
+    val r = RDCSS_READ_ROOT()
     if (RDCSS_ROOT(r, r.GCAS_READ(this), r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this), rootupdater)
     else snapshot()
   }
   
   @tailrec final def readOnlySnapshot(): Map[K, V] = {
-    val r = READ_ROOT()
+    val r = RDCSS_READ_ROOT()
     if (RDCSS_ROOT(r, r.GCAS_READ(this), r.copy(new Gen, this))) new ConcurrentTrie(r, null)
     else readOnlySnapshot()
+  }
+  
+  @tailrec final override def clear() {
+    val r = RDCSS_READ_ROOT()
+    if (!RDCSS_ROOT(r, r.GCAS_READ(this), INode.newRootNode[K, V])) clear()
   }
   
   final def lookup(k: K): V = {
@@ -813,7 +818,7 @@ class CtrieIterator[K, V](ct: ConcurrentTrie[K, V], mustInit: Boolean = true) ex
   @inline private def initialize() {
     assert(ct.isReadOnly)
     
-    val r = ct.READ_ROOT()
+    val r = ct.RDCSS_READ_ROOT()
     readin(r)
   }
   
