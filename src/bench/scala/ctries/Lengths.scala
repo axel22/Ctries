@@ -84,17 +84,17 @@ object Lengths {
   }
   
   def main(args: Array[String]) {
-    val maxd = maxdepth(ct, ct.READ_ROOT(), 1)
+    val maxd = maxdepth(ct, ct.RDCSS_READ_ROOT(), 1)
     println("Maximum inode: %d".format(maxd))
     
-    val (sntotal, snpath) = avgdepth(ct, ct.READ_ROOT(), 1L)
+    val (sntotal, snpath) = avgdepth(ct, ct.RDCSS_READ_ROOT(), 1L)
     println("Average inode: %f = %d / %d".format(1.0 * snpath / sntotal, snpath, sntotal))
     
-    val (ndtotal, ndpath) = avgnodes(ct, ct.READ_ROOT(), 1L)
+    val (ndtotal, ndpath) = avgnodes(ct, ct.RDCSS_READ_ROOT(), 1L)
     println("Average nodes: %f = %d / %d".format(1.0 * ndpath / ndtotal, ndpath, ndtotal))
     
     val hist = new Array[Long](HSZ)
-    histogram(ct, ct.READ_ROOT(), 1, hist)
+    histogram(ct, ct.RDCSS_READ_ROOT(), 1, hist)
     printHist(hist)
     
     if (sz < 128) println(ct.string)
