@@ -119,3 +119,32 @@ object MultiInsertCtrie2 extends Benchmark {
 }
 
 
+object MultiInsertCliff extends Benchmark {
+  import org.cliffc.high_scale_lib._
+  
+  def run() {
+    val hm = new NonBlockingHashMap[Elem, Elem]
+    val p = par.get
+    val step = sz / p
+    
+    val ins = for (i <- 0 until p) yield new Updater(hm, i, step)
+    
+    for (i <- ins) i.start()
+    for (i <- ins) i.join()
+  }
+  
+  class Updater(hm: NonBlockingHashMap[Elem, Elem], n: Int, step: Int) extends Thread {
+    override def run() {
+      var i = n * step
+      val until = (n + 1) * step
+      val e = elems
+      
+      while (i < until) {
+        hm.put(e(i), e(i))
+        i += 1
+      }
+    }
+  }
+}
+
+

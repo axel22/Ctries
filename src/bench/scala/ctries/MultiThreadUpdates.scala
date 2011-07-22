@@ -142,3 +142,48 @@ object MultiUpdateCtrie2 extends Benchmark {
 }
 
 
+object MultiUpdateCliff extends Benchmark {
+  import org.cliffc.high_scale_lib._  
+  
+  var hm = new NonBlockingHashMap[Elem, Elem]
+  val array = Array.fill(lookups.get)(0) ++ Array.fill(inserts.get)(1) ++ Array.fill(removes.get)(2)
+  
+  override def setUp() {
+    hm = new NonBlockingHashMap[Elem, Elem]
+    for (i <- 0 until sz) hm.put(elems(i), elems(i))
+  }
+  
+  def run() {
+    val p = par.get
+    val howmany = totalops.get / p
+    
+    val ws = for (i <- 0 until p) yield new Worker(hm, i, howmany)
+    
+    for (i <- ws) i.start()
+    for (i <- ws) i.join()
+  }
+  
+  class Worker(hm: NonBlockingHashMap[Elem, Elem], n: Int, howmany: Int) extends Thread {
+    override def run() {
+      var i = 0
+      val until = howmany
+      val e = elems
+      val arr = array
+      val arrlen = array.length
+      val s = sz
+      
+      while (i < until) {
+        val imodsz = i % s
+        array(i % arrlen) match {
+          case 0 => hm.get(e(imodsz))
+          case 1 => hm.put(e(imodsz), e(imodsz))
+          case 2 => hm.remove(e(imodsz))
+        }
+        
+        i += 1
+      }
+    }
+  }
+}
+
+

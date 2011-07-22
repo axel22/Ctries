@@ -28,10 +28,13 @@ class Ctries(info: ProjectInfo) extends DefaultProject(info) {
     comm !;
   }
   
-  def benchcomm(args: String) = "java -Xmx2048m -Xms2048m -server -cp %s:%s:%s %s".format(
+  def libsPath = ("lib" ** "*.jar").get.mkString(":")
+  
+  def benchcomm(args: String) = "java -Xmx2048m -Xms2048m -server -cp %s:%s:%s:%s %s".format(
     packageTestJar,
     buildScalaInstance.libraryJar,
     jarPath,
+    libsPath,
     args)
   
   val plotresfile = File.createTempFile("plot", "out")

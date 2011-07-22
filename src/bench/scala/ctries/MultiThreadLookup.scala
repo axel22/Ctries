@@ -124,3 +124,34 @@ object MultiLookupCtrie2 extends Benchmark {
   }
 }
 
+
+object MultiLookupCliff extends Benchmark {
+  import org.cliffc.high_scale_lib._  
+  
+  val hm = new NonBlockingHashMap[Elem, Elem]
+  for (i <- 0 until sz) hm.put(elems(i), elems(i))
+  
+  def run() {
+    val p = par.get
+    val step = sz / p
+    
+    val ins = for (i <- 0 until p) yield new Looker(hm, i, step)
+    
+    for (i <- ins) i.start()
+    for (i <- ins) i.join()
+  }
+  
+  class Looker(hm: NonBlockingHashMap[Elem, Elem], n: Int, step: Int) extends Thread {
+    override def run() {
+      var i = n * step
+      val until = (n + 1) * step
+      val e = elems
+      
+      while (i < until) {
+        hm.get(e(i))
+        i += 1
+      }
+    }
+  }
+}
+
