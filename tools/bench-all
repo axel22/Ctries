@@ -1,7 +1,7 @@
 #!/bin/bash
 
 if [ "$1" == "-h" ]; then
-  echo "Runs all benchmarks. Synthax: bench-all <workstation> <numproc-range> <size-range> <lookups> <inserts> <removes> <totalops-for-bench-update>"
+  echo "Runs all benchmarks. Synthax: bench-all <workstation> <numproc-range> <size-range> <lookups> <inserts> <removes> <totalops-for-bench-update> <pagerank-pagegenerator> <pagerank-maxlinks> <pagerank-damping> <pagerank-size>"
 else
   tools/bench-insert $@
   tools/bench-lookup $@
@@ -9,4 +9,5 @@ else
   tools/bench-update $@
   tools/bench-snapshot $@
   tools/bench-iter $@
+  tools/bench-pagerank $@
 fi
