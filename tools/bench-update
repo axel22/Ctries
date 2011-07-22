@@ -1,3 +1,3 @@
 #!/bin/bash
-TASK="bench-batch --gnuplot=$1-update -Dsz=$3 -Dpar=$2 -Dlookups=$4 -Dinserts=$5 -Dremoves=$6 -Dtotalops=$7 ctries.MultiUpdateCtrie2 ctries.MultiUpdateSkipList ctries.MultiUpdateCHM"
+TASK="bench-batch --gnuplot=$1-update -Dsz=$3 -Dpar=$2 -Dlookups=$4 -Dinserts=$5 -Dremoves=$6 -Dtotalops=$7 ctries.MultiUpdateCtrie2 ctries.MultiUpdateSkipList ctries.MultiUpdateCHM ctries.MultiUpdateCliff"
 sbt "$TASK"
