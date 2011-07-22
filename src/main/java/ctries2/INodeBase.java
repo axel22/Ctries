@@ -6,13 +6,13 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 
 
-public abstract class INodeBase extends BasicNode {
+public abstract class INodeBase<K, V> extends BasicNode {
     
-    public static final AtomicReferenceFieldUpdater<INodeBase, BasicNode> updater = AtomicReferenceFieldUpdater.newUpdater(INodeBase.class, BasicNode.class, "mainnode");
+    public static final AtomicReferenceFieldUpdater<INodeBase, MainNode> updater = AtomicReferenceFieldUpdater.newUpdater(INodeBase.class, MainNode.class, "mainnode");
     
     public static final Object RESTART = new Object();
     
-    public volatile BasicNode mainnode = null;
+    public volatile MainNode<K, V> mainnode = null;
     
     public Gen gen;
     

@@ -6,8 +6,8 @@ package ctries2;
 
 public abstract class ConcurrentTrieBase<K, V> {
     
-    public volatile INode<K, V> root = null;
+    public volatile Object root = null;
     
-    protected Object RESTART = INodeBase.RESTART;
+    //protected Object RESTART = INodeBase.RESTART;
     
 }
