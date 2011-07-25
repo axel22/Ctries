@@ -36,10 +36,11 @@ while ($line = <SOURCE>) {
   @cells = split(/  | \n| /, $line);
   $len = @cells;
   #print "$len \n";
-  $plots{@cells[$z]} = () if !exists $plots{@cells[$z]};
+  $zcol = int(@cells[$z]);
+  $plots{$zcol} = () if !exists $plots{$zcol};
   for ($n = $y; $n < $len; $n++) {
-    $plots{@cells[$z]}{$n} = () if !exists $plots{@cells[$z]}{$n};
-    $plots{@cells[$z]}{$n}{@cells[$x]} = process(@cells[$n]);
+    $plots{$zcol}{$n} = () if !exists $plots{$zcol}{$n};
+    $plots{$zcol}{$n}{@cells[$x]} = process(@cells[$n]);
     print "$n: process(@cells[$n]) \n";
   }
 }
@@ -47,21 +48,23 @@ while ($line = <SOURCE>) {
 
 print PLOT "\\begin{figure}[h] \n";
 print PLOT "\\begin{center} \n";
-print PLOT "\\begin{tabular}{ c c } \n";
+print PLOT "\\renewcommand{\\tabcolsep}{0cm} \n";
+print PLOT "\\begin{tabular}{ c c c } \n";
 print PLOT "\n";
-foreach $graph (sort(keys %plots)) {
+foreach $graph (sort {$a <=> $b} (keys %plots)) {
   print "$graph: $plots{$graph} \n";
   print PLOT "\\begin{tikzpicture}[scale=0.67] \n";
   print PLOT "\\begin{axis}[height=5cm,width=5cm] \n";
   foreach $plot (sort(keys %{$plots{$graph}})) {
     print "  $plot: $plots{$graph}{$plot} \n";
     $mnum = $plot - $y;
+    if ($mnum == 0) { $mark = ""; }
     if ($mnum == 1) { $mark = ",mark=o"; }
     if ($mnum == 2) { $mark = ",mark=x"; }
     if ($mnum == 3) { $mark = ",mark=*"; }
     print "$mnum \n";
     print PLOT "\\addplot[smooth$mark] \n";
-    print PLOT "plot coordinates ( \n";
+    print PLOT "plot coordinates { \n";
     foreach $ntr (sort(keys %{$plots{$graph}{$plot}})) {
       print "    $ntr: $plots{$graph}{$plot}{$ntr} \n";
       print PLOT "($ntr, $plots{$graph}{$plot}{$ntr}) \n";
@@ -71,15 +74,18 @@ foreach $graph (sort(keys %plots)) {
   print PLOT "\\end{axis} \n";
   print PLOT "\\end{tikzpicture} \n";
   print PLOT "\n";
-  if ($gcount % 2 == 0) { print PLOT "\\\\ \n"; }
-  else { print PLOT "& \n"; }
-  print PLOT "\n";
   $gcount++;
+  if ($gcount % 3 != 0) { print PLOT "& \n"; }
+  else { print PLOT "\\\\ \n"; }
+  print PLOT "\n";
 }
 print PLOT "\n";
-print PLOT "\\end{figure} \n";
-print PLOT "\\end{center} \n";
 print PLOT "\\end{tabular} \n";
+print PLOT "\\end{center} \n";
+print PLOT "\n";
+print PLOT "\\caption{Benchmark} \n";
+print PLOT "\\label{f-bench} \n";
+print PLOT "\\end{figure} \n";
 
 
 close(SOURCE);
