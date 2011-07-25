@@ -1,0 +1,3 @@
+#!/bin/bash
+TASK="bench-batch --gnuplot=$1-snapshot-lookup -Dsz=$3 -Dpar=$2 ctries.MultiLookingCtrie2 ctries.MultiLookingCtrie2Snapshot"
+sbt "$TASK"
