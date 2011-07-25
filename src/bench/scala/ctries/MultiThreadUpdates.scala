@@ -15,7 +15,7 @@ object MultiUpdateCHM extends Benchmark {
   
   override def setUp() {
     chm = new ConcurrentHashMap[Elem, Elem]
-    for (i <- 0 until sz) chm.put(elems(i), elems(i))
+    if (updateFilled) for (i <- 0 until sz) chm.put(elems(i), elems(i))
   }
   
   def run() {
@@ -60,7 +60,7 @@ object MultiUpdateSkipList extends Benchmark {
   
   override def setUp() {
     csl = new ConcurrentSkipListMap[Elem, Elem]
-    for (i <- 0 until sz) csl.put(elems(i), elems(i))
+    if (updateFilled) for (i <- 0 until sz) csl.put(elems(i), elems(i))
   }
   
   def run() {
@@ -105,7 +105,7 @@ object MultiUpdateCtrie2 extends Benchmark {
   
   override def setUp() {
     ct = new ConcurrentTrie[Elem, Elem]
-    for (i <- 0 until sz) ct.put(elems(i), elems(i))
+    if (updateFilled) for (i <- 0 until sz) ct.put(elems(i), elems(i))
   }
   
   def run() {
@@ -150,7 +150,7 @@ object MultiUpdateCliff extends Benchmark {
   
   override def setUp() {
     hm = new NonBlockingHashMap[Elem, Elem]
-    for (i <- 0 until sz) hm.put(elems(i), elems(i))
+    if (updateFilled) for (i <- 0 until sz) hm.put(elems(i), elems(i))
   }
   
   def run() {

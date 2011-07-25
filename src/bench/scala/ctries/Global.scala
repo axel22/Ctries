@@ -35,6 +35,7 @@ object Global {
   val damping = Option(System.getProperty("damping")).map(_.toDouble)
   val maxlinks = Option(System.getProperty("maxlinks")).map(_.toInt)
   val pagegenerator = Option(System.getProperty("pagegenerator"))
+  val updateFilled = Option(System.getProperty("updateFilled")).map(_.toBoolean).getOrElse(false)
   val debug = Option(System.getProperty("debug")).map(_.toBoolean).getOrElse(false)
   val elems = (for (i <- 0 until (sz * 2)) yield Elem(i)).toArray
 }
