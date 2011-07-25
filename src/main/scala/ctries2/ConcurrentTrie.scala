@@ -208,11 +208,11 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
     m match {
       case cn: CNode[K, V] => // 1) a multinode
         val idx = (hc >>> lev) & 0x1f
-        val bmp = cn.bitmap
         val flag = 1 << idx
+        val bmp = cn.bitmap
         if ((bmp & flag) == 0) null // 1a) bitmap shows no binding
         else { // 1b) bitmap contains a value - descend
-          val pos = Integer.bitCount(bmp & (flag - 1))
+          val pos = if (bmp == 0xffffffff) idx else Integer.bitCount(bmp & (flag - 1))
           val sub = cn.array(pos)
           sub match {
             case in: INode[K, V] =>
@@ -357,18 +357,6 @@ final class FailedNode[K, V](p: MainNode[K, V]) extends MainNode[K, V] {
 }
 
 
-/* unused
-final class NullNode(p: BasicNode) extends BasicNode {
-  prev = p
-  
-  def string(lev: Int) = throw new UnsupportedOperationException
-  def casPrev(ov: BasicNode, nv: BasicNode) = throw new UnsupportedOperationException
-  
-  override def isNullNode = true
-}
-*/
-
-
 trait KVNode[K, V] {
   def kvPair: (K, V)
 }
@@ -455,20 +443,6 @@ extends CNodeBase[K, V] {
   private def resurrect(inode: INode[K, V], inodemain: AnyRef) = inodemain match {
     case tn: TNode[_, _] => tn.copyUntombed
     case _ => inode
-  }
-  
-  private def extractTNode(n: BasicNode, ct: ConcurrentTrie[K, V]) = n match {
-    case in: INode[K, V] => in.GCAS_READ(ct) match {
-      case tn: TNode[K, V] => tn
-    }
-  }
-  
-  private def isTombed(bn: BasicNode, ct: ConcurrentTrie[K, V]) = bn match {
-    case in: INode[K, V] => in.GCAS_READ(ct) match {
-      case tn: TNode[K, V] => true
-      case _ => false
-    }
-    case _ => false
   }
   
   final def toContracted(lev: Int) = if (array.length == 1 && lev > 0) array(0) match {
