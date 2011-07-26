@@ -104,7 +104,10 @@ object MultiRemovingCtrie2Snapshot extends Benchmark {
   import ctries2.ConcurrentTrie
   
   val ct = new ConcurrentTrie[Elem, Elem]
-  for (i <- 0 until sz) ct.put(elems(i), elems(i))
+  
+  override def setUp() {
+    for (i <- 0 until sz) ct.update(elems(i), elems(i))
+  }
   
   def run() {
     val p = par.get
@@ -136,10 +139,7 @@ object MultiLookingCtrie2 extends Benchmark {
   import ctries2.ConcurrentTrie
   
   val ct = new ConcurrentTrie[Elem, Elem]
-  
-  override def setUp() {
-    for (i <- 0 until sz) ct.update(elems(i), elems(i))
-  }
+  for (i <- 0 until sz) ct.update(elems(i), elems(i))
   
   def run() {
     val p = par.get
@@ -170,7 +170,7 @@ object MultiLookingCtrie2Snapshot extends Benchmark {
   import ctries2.ConcurrentTrie
   
   val ct = new ConcurrentTrie[Elem, Elem]
-  for (i <- 0 until sz) ct.put(elems(i), elems(i))
+  for (i <- 0 until sz) ct.update(elems(i), elems(i))
   
   def run() {
     val p = par.get
