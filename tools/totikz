@@ -65,7 +65,7 @@ foreach $graph (sort {$a <=> $b} (keys %plots)) {
     print "$mnum \n";
     print PLOT "\\addplot[smooth$mark] \n";
     print PLOT "plot coordinates { \n";
-    foreach $ntr (sort(keys %{$plots{$graph}{$plot}})) {
+    foreach $ntr (sort {$a <=> $b} (keys %{$plots{$graph}{$plot}})) {
       print "    $ntr: $plots{$graph}{$plot}{$ntr} \n";
       print PLOT "($ntr, $plots{$graph}{$plot}{$ntr}) \n";
     }
