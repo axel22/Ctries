@@ -49,8 +49,39 @@ object FlatHash extends Benchmark {
     
     do {
       while (arr.get(idx) != null) idx = (idx + 1) % len
-      if (arr.compareAndSet(idx, null, e)) idx = -1
+      if (arr.weakCompareAndSet(idx, null, e)) idx = -1
     } while (idx != -1)
   }
   
 }
+
+
+
+object FlatHashNoComm extends Benchmark {
+  import java.util.concurrent.atomic.AtomicReferenceArray
+  
+  def run() {
+    val p = par.get
+    val step = sz / p
+    
+    val ins = for (i <- 0 until p) yield new Inserter(0, i, step)
+    
+    for (i <- ins) i.start()
+    for (i <- ins) i.join()
+  }
+  
+  class Inserter(var s: Int = 0, n: Int, step: Int) extends Thread {
+    override def run() {
+      var i = n * step
+      val until = (n + 1) * step
+      val e = elems
+      
+      while (i < until) {
+        s += i * i % (n + 1) + step
+        i += 1
+      }
+    }
+  }
+  
+}
+
