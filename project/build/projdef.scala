@@ -11,7 +11,8 @@ class Ctries(info: ProjectInfo) extends DefaultProject(info) {
   
   /* deps */
   
-  //val scalatest = "org.scalatest" % "scalatest" % "1.4-SNAPSHOT"
+  val scalatest = "org.scalatest" %% "scalatest" % "1.6.1"
+  val scalacheck = "org.scala-tools.testing" %% "scalacheck" % "1.9"
   
   /* config */
   
