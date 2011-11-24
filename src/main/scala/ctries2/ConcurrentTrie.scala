@@ -60,7 +60,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
   }
   
   @inline final def GCAS(old: MainNode[K, V], n: MainNode[K, V], ct: ConcurrentTrie[K, V]): Boolean = {
-    /*WRITE*/n.prev = old
+    n.WRITE_PREV(old)
     if (CAS(old, n)) {
       GCAS_COMPLETE(n, ct)
       /*READ*/n.prev eq null
@@ -400,10 +400,8 @@ extends MainNode[K, V] {
 }
 
 
-final class CNode[K, V](bmp0: Int, a0: Array[BasicNode])
-extends CNodeBase[K, V] {
-  bitmap = bmp0
-  array = a0
+final class CNode[K, V](val bitmap: Int, val array: Array[BasicNode])
+extends MainNode[K, V] {
   
   final def updatedAt(pos: Int, nn: BasicNode) = {
     val len = array.length
@@ -620,40 +618,11 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   def string = RDCSS_READ_ROOT().string(0)
   
-  // TODO work on this
-  /*
-  protected def cacheSizes(in: INode[K, V]): Int = {
-    val m = in.GCAS_READ(this)
-    m match {
-      case cn: CNode[K, V] if cn.cachedsize != -1 => cn.cachedsize
-      case tn: TNode[K, V] => 1
-      case ln: LNode[K, V] => ln.listmap.size
-      case cn: CNode[K, V] =>
-        var i = 0
-        var total = 0
-        while (i < cn.array.length) {
-          cn.array(i) match {
-            case sn: SNode[K, V] => total += 1
-            case nd: INode[K, V] => total += cacheSizes(nd)
-          }
-          i += 1
-        }
-        cn.cachedsize = total
-        total
-    }
-  }
-  */
-  
   /* public methods */
   
   @inline final def isReadOnly = rootupdater eq null
   
   @inline final def nonReadOnly = rootupdater ne null
-  
-  /*final def cacheSizes() {
-    assert(isReadOnly)
-    cacheSizes(/*READ*/root)
-  }*/
   
   @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
     val r = RDCSS_READ_ROOT()

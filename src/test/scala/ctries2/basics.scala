@@ -68,32 +68,45 @@ class CtrieChecks extends Properties("Ctrie") {
     (start until end)
   }
   
+  def hasGrown[K, V](last: Map[K, V], current: Map[K, V]) = {
+    (last.size <= current.size) && {
+      last forall {
+        case (k, v) => current.get(k) == Some(v)
+      }
+    }
+  }
+  
+  object err {
+    var buffer = new StringBuilder
+    def println(a: AnyRef) = buffer.append(a.toString).append("\n")
+    def clear() = buffer.clear()
+    def flush() = {
+      Console.out.println(buffer)
+      clear()
+    }
+  }
+  
   
   /* properties */
   
   property("concurrent growing snapshots") = forAll(threadCounts, sizes) {
-    (p, sz) =>
+    (numThreads, numElems) =>
+    val p = 9 //numThreads
+    val sz = 128 //numElems
     val ct = new ConcurrentTrie[Wrap, Int]
-    println(p, sz)
+    err.println("----------------------")
     
     // checker
     val future = spawn {
-      def hasGrown(last: Map[Wrap, Int], current: Map[Wrap, Int]) = {
-        (last.size <= current.size) && {
-          last forall {
-            case (k, v) => current.get(k) == Some(v)
-          }
-        }
-      }
       def check(last: Map[Wrap, Int], iterationsLeft: Int): Boolean = {
         val current = ct.readOnlySnapshot()
-        println("new check! " + current.size + " / " + sz)
+        err.println("new check! " + current.size + " / " + sz)
         if (!hasGrown(last, current)) false
         else if (current.size == sz) true
         else if (iterationsLeft < 0) false
         else check(current, iterationsLeft - 1)
       }
-      check(ct.readOnlySnapshot(), 50)
+      check(ct.readOnlySnapshot(), 100)
     }
     
     // fillers
@@ -104,12 +117,18 @@ class CtrieChecks extends Properties("Ctrie") {
     
     // wait for checker to finish
     val growing = future.get
+    if (!growing) {
+      err.println("size: " + ct.size)
+      err.println(ct.toList.map(_._2).sorted.zip(0 until sz).find(p => p._1 != p._2))
+      err.flush()
+    } else err.clear()
     
     growing && ((0 until sz) forall {
       case i => ct.get(Wrap(i)) == Some(i)
     })
   }
   
+  /*
   property("update") = forAll(sizes) {
     (n: Int) =>
     val ct = new ConcurrentTrie[Int, Int]
@@ -118,6 +137,7 @@ class CtrieChecks extends Properties("Ctrie") {
       case i => ct(i) == i
     }
   }
+  
   
   property("concurrent update") = forAll(threadCountsAndSizes) {
     case (p, sz) =>
@@ -132,6 +152,7 @@ class CtrieChecks extends Properties("Ctrie") {
         case i => ct(Wrap(i)) == i
       }
   }
+  
   
   property("concurrent remove") = forAll(threadCounts, sizes) {
     (p, sz) =>
@@ -148,6 +169,7 @@ class CtrieChecks extends Properties("Ctrie") {
     }
   }
   
+  
   property("concurrent putIfAbsent") = forAll(threadCounts, sizes) {
     (p, sz) =>
     val ct = new ConcurrentTrie[Wrap, Int]
@@ -161,6 +183,7 @@ class CtrieChecks extends Properties("Ctrie") {
       case i => ct.get(Wrap(i)) == Some(i)
     })
   }
+  */
   
 }
 

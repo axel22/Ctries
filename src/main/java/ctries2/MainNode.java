@@ -16,4 +16,8 @@ public abstract class MainNode<K, V> extends BasicNode {
 	return updater.compareAndSet(this, oldval, nval);
     }
     
+    public void WRITE_PREV(MainNode<K, V> nval) {
+	updater.set(this, nval);
+    }
+    
 }
