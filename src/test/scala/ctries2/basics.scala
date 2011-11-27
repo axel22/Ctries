@@ -9,7 +9,7 @@ import collection._
 
 
 
-class CtrieChecks extends Properties("Ctrie") {
+object CtrieChecks extends Properties("Ctrie") {
   
   /* generators */
   
@@ -27,6 +27,7 @@ class CtrieChecks extends Properties("Ctrie") {
   
   def inParallel[T](totalThreads: Int)(body: Int => T): Seq[T] = {
     val threads = for (idx <- 0 until totalThreads) yield new Thread {
+      setName("ParThread-" + idx)
       private var res: T = _
       override def run() {
         res = body(idx)
@@ -43,6 +44,7 @@ class CtrieChecks extends Properties("Ctrie") {
   
   def spawn[T](body: =>T): { def get: T } = {
     val t = new Thread {
+      setName("SpawnThread")
       private var res: T = _
       override def run() {
         res = body
@@ -91,41 +93,47 @@ class CtrieChecks extends Properties("Ctrie") {
   
   property("concurrent growing snapshots") = forAll(threadCounts, sizes) {
     (numThreads, numElems) =>
-    val p = 9 //numThreads
-    val sz = 128 //numElems
+    val p = 4 //numThreads
+    val sz = 72 //numElems
     val ct = new ConcurrentTrie[Wrap, Int]
     err.println("----------------------")
     
     // checker
-    val future = spawn {
+    val checker = spawn {
       def check(last: Map[Wrap, Int], iterationsLeft: Int): Boolean = {
         val current = ct.readOnlySnapshot()
         err.println("new check! " + current.size + " / " + sz)
         if (!hasGrown(last, current)) false
-        else if (current.size == sz) true
+        else if (current.size >= sz) true
         else if (iterationsLeft < 0) false
         else check(current, iterationsLeft - 1)
       }
-      check(ct.readOnlySnapshot(), 100)
+      check(ct.readOnlySnapshot(), 5000)
     }
     
     // fillers
     inParallel(p) {
       idx =>
-      elementRange(idx, p, sz) foreach (i => ct.put(Wrap(i), i))
+      elementRange(idx, p, sz) foreach (i => ct.update(Wrap(i), i))
     }
     
     // wait for checker to finish
-    val growing = future.get
-    if (!growing) {
+    val growing = checker.get
+    
+    val ok = growing && ((0 until sz) forall {
+      case i => ct.get(Wrap(i)) == Some(i)
+    })
+    
+    if (!ok) {
+      err.flush()
+      ct.flush()
       err.println("size: " + ct.size)
       err.println(ct.toList.map(_._2).sorted.zip(0 until sz).find(p => p._1 != p._2))
+      err.println(ct.RDCSS_READ_ROOT().mainnode)
       err.flush()
     } else err.clear()
     
-    growing && ((0 until sz) forall {
-      case i => ct.get(Wrap(i)) == Some(i)
-    })
+    ok
   }
   
   /*

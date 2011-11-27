@@ -20,4 +20,9 @@ public abstract class MainNode<K, V> extends BasicNode {
 	updater.set(this, nval);
     }
     
+    // do we need this? unclear in the javadocs...
+    public MainNode<K, V> READ_PREV() {
+	return updater.get(this);
+    }
+    
 }

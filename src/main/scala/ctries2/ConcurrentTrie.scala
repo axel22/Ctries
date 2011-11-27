@@ -14,20 +14,35 @@ import annotation.switch
 final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
   import INodeBase._
   
-  mainnode = bn
+  WRITE(bn)
   
   def this(g: Gen) = this(null, g)
   
+  @inline final def WRITE(nval: MainNode[K, V]) = INodeBase.updater.set(this, nval)
+  
   @inline final def CAS(old: MainNode[K, V], n: MainNode[K, V]) = INodeBase.updater.compareAndSet(this, old, n)
   
+  /*
   @inline final def GCAS_READ(ct: ConcurrentTrie[K, V]): MainNode[K, V] = {
     val m = /*READ*/mainnode
     val prevval = /*READ*/m.prev
     if (prevval eq null) m
-    else GCAS_COMPLETE(m, ct)
+    else GCAS_Complete(m, ct)
+  }
+  */
+    
+  // debugging
+  @inline final def GCAS_READ(ct: ConcurrentTrie[K, V], shouldlog: Boolean = false): MainNode[K, V] = {
+    val m = /*READ*/mainnode
+    val prevval = /*READ*/m.prev
+    val result =
+      if (prevval eq null) m
+      else GCAS_Complete(m, ct)
+    if (shouldlog) ct.log((Thread.currentThread.getName, "GCAS_READ", this.gen.generation, result, this))
+    result
   }
   
-  @tailrec private def GCAS_COMPLETE(m: MainNode[K, V], ct: ConcurrentTrie[K, V]): MainNode[K, V] = if (m eq null) null else {
+  @tailrec private def GCAS_Complete(m: MainNode[K, V], ct: ConcurrentTrie[K, V]): MainNode[K, V] = if (m eq null) null else {
     // complete the GCAS
     val prev = /*READ*/m.prev
     val ctr = ct.RDCSS_READ_ROOT(true)
@@ -36,8 +51,9 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
       case null =>
         m
       case fn: FailedNode[_, _] => // try to commit to previous value
+        //ct.log(Thread.currentThread.getName + ": found failed node - " + fn)
         if (CAS(m, fn.prev)) fn.prev
-        else GCAS_COMPLETE(/*READ*/mainnode, ct)
+        else GCAS_Complete(/*READ*/mainnode, ct)
       case vn: MainNode[_, _] =>
         // Assume that you've read the root from the generation G.
         // Assume that the snapshot algorithm is correct.
@@ -50,32 +66,56 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
         if ((ctr.gen eq gen) && ct.nonReadOnly) {
           // try to commit
           if (m.CAS_PREV(prev, null)) m
-          else GCAS_COMPLETE(m, ct)
+          else GCAS_Complete(m, ct)
         } else {
           // try to abort
           m.CAS_PREV(prev, new FailedNode(prev))
-          GCAS_COMPLETE(/*READ*/mainnode, ct)
+          GCAS_Complete(/*READ*/mainnode, ct)
         }
     }
   }
   
+  /*
   @inline final def GCAS(old: MainNode[K, V], n: MainNode[K, V], ct: ConcurrentTrie[K, V]): Boolean = {
     n.WRITE_PREV(old)
     if (CAS(old, n)) {
-      GCAS_COMPLETE(n, ct)
+      GCAS_Complete(n, ct)
       /*READ*/n.prev eq null
+    } else false
+  }
+  */
+  
+  // debugging
+  @inline final def GCAS(old: MainNode[K, V], n: MainNode[K, V], ct: ConcurrentTrie[K, V], cause: Char = 'm'): Boolean = {
+    n.WRITE_PREV(old)
+    if (CAS(old, n)) {
+      GCAS_Complete(n, ct)
+      val ok = /*READ*/n.prev eq null
+      if (ok) ct.log((Thread.currentThread.getName, "GCAS-" + cause, this.gen.generation, old, n, this))
+      ok
     } else false
   }
   
   @inline private def inode(cn: MainNode[K, V]) = {
     val nin = new INode[K, V](gen)
-    /*WRITE*/nin.mainnode = cn
+    nin.WRITE(cn)
     nin
   }
   
+  /*
   @inline final def copy(ngen: Gen, ct: ConcurrentTrie[K, V]) = {
     val nin = new INode[K, V](ngen)
-    /*WRITE*/nin.mainnode = GCAS_READ(ct)
+    val main = GCAS_READ(ct, true)
+    nin.WRITE(main)
+    nin
+  }
+  */
+  
+  // debugging
+  @inline final def copy(ngen: Gen, ct: ConcurrentTrie[K, V], shouldlog: Boolean = false) = {
+    val nin = new INode[K, V](ngen)
+    val main = GCAS_READ(ct, shouldlog)
+    nin.WRITE(main)
     nin
   }
   
@@ -95,7 +135,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
             case in: INode[K, V] =>
               if (startgen eq in.gen) in.rec_insert(k, v, hc, lev + 5, this, startgen, ct)
               else {
-                if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_insert(k, v, hc, lev, parent, startgen, ct)
+                if (GCAS(cn, cn.renewed(startgen, ct), ct, '!')) rec_insert(k, v, hc, lev, parent, startgen, ct)
                 else false
               }
             case sn: SNode[K, V] =>
@@ -219,7 +259,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
               if (ct.isReadOnly || (startgen eq in.gen)) in.rec_lookup(k, hc, lev + 5, this, startgen, ct)
               else {
                 if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_lookup(k, hc, lev, parent, startgen, ct)
-                else throw RestartException
+                else return RESTART // throw RestartException
               }
             case sn: SNode[K, V] => // 2) singleton node
               if (sn.hc == hc && sn.k == k) sn.v.asInstanceOf[AnyRef]
@@ -229,7 +269,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
       case tn: TNode[K, V] => // 3) non-live node
         def cleanReadOnly(tn: TNode[K, V]) = if (ct.nonReadOnly) {
           clean(parent, ct, lev - 5)
-          throw RestartException
+          RESTART // throw RestartException
         } else {
           if (tn.hc == hc && tn.k == k) tn.v.asInstanceOf[AnyRef]
           else null
@@ -350,10 +390,11 @@ object INode {
 
 
 final class FailedNode[K, V](p: MainNode[K, V]) extends MainNode[K, V] {
-  prev = p
+  WRITE_PREV(p)
   
   def string(lev: Int) = throw new UnsupportedOperationException
-  def casPrev(ov: BasicNode, nv: BasicNode) = throw new UnsupportedOperationException
+  
+  override def toString = "FailedNode(%s)".format(p)
 }
 
 
@@ -400,7 +441,7 @@ extends MainNode[K, V] {
 }
 
 
-final class CNode[K, V](val bitmap: Int, val array: Array[BasicNode])
+final class CNode[K, V](final val bitmap: Int, final val array: Array[BasicNode])
 extends MainNode[K, V] {
   
   final def updatedAt(pos: Int, nn: BasicNode) = {
@@ -424,13 +465,14 @@ extends MainNode[K, V] {
    *  to the specified generation `ngen`.
    */
   final def renewed(ngen: Gen, ct: ConcurrentTrie[K, V]) = {
+    ct.log((Thread.currentThread.getName, "attempting renewal to ngen: " + ngen.generation))
     var i = 0
     val arr = array
     val len = arr.length
     val narr = new Array[BasicNode](len)
     while (i < len) {
       arr(i) match {
-        case in: INode[K, V] => narr(i) = in.copy(ngen, ct)
+        case in: INode[K, V] => narr(i) = in.copy(ngen, ct, true)
         case bn: BasicNode => narr(i) = bn
       }
       i += 1
@@ -476,6 +518,26 @@ extends MainNode[K, V] {
   }
   
   private[ctries2] def string(lev: Int): String = "CNode %x\n%s".format(bitmap, array.map(_.string(lev + 1)).mkString("\n"))
+  
+  /* quiescently consistent - don't call concurrently to anything involving a GCAS!! */
+  protected def collectElems: Seq[(K, V)] = array flatMap {
+    case sn: SNode[K, V] => Some(sn.kvPair)
+    case in: INode[K, V] => in.mainnode match {
+      case tn: TNode[K, V] => Some(tn.kvPair)
+      case ln: LNode[K, V] => ln.listmap.toList
+      case cn: CNode[K, V] => cn.collectElems
+    }
+  }
+  
+  protected def collectLocalElems: Seq[String] = array flatMap {
+    case sn: SNode[K, V] => Some(sn.kvPair._2.toString)
+    case in: INode[K, V] => Some(in.toString.drop(14))
+  }
+  
+  override def toString = {
+    val elems = collectLocalElems
+    "CNode(sz: %d; %s)".format(elems.size, elems.sorted.mkString(", "))
+  }
 }
 
 
@@ -511,15 +573,16 @@ case class RDCSS_Descriptor[K, V](old: INode[K, V], expectedmain: MainNode[K, V]
 }
 
 
-class ConcurrentTrie[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater[ConcurrentTrieBase[K, V], AnyRef])
-extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
+class ConcurrentTrie[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater[ConcurrentTrie[K, V], AnyRef])
+extends ConcurrentMap[K, V]
+with DebuggingSupport
+{
   private val rootupdater = rtupd
-  
-  root = r
+  @volatile var root = r
   
   def this() = this(
     INode.newRootNode,
-    AtomicReferenceFieldUpdater.newUpdater(classOf[ConcurrentTrieBase[K, V]], classOf[AnyRef], "root")
+    AtomicReferenceFieldUpdater.newUpdater(classOf[ConcurrentTrie[K, V]], classOf[AnyRef], "root")
   )
   
   /* internal methods */
@@ -583,21 +646,14 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
     else ret
   }
   
-  /*
   @tailrec private def lookuphc(k: K, hc: Int): AnyRef = {
     val r = RDCSS_READ_ROOT()
-    if (r eq null) null
-    else {
-      val res = r.rec_lookup(k, hc, 0, null)
-      if (res ne RESTART) res
-      else {
-        if (r.isNullInode) rootupdater.compareAndSet(this, r, null)
-        lookuphc(k, hc)
-      }
-    }
+    val res = r.rec_lookup(k, hc, 0, null, r.gen, this)
+    if (res eq INodeBase.RESTART) lookuphc(k, hc)
+    else res
   }
-  */
   
+  /*
   //@tailrec
   private def lookuphc(k: K, hc: Int): AnyRef = {
     val r = RDCSS_READ_ROOT()
@@ -608,6 +664,7 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
         lookuphc(k, hc)
     }
   }
+  */
   
   @tailrec private def removehc(k: K, v: V, hc: Int): Option[V] = {
     val r = RDCSS_READ_ROOT()
@@ -626,13 +683,15 @@ extends ConcurrentTrieBase[K, V] with ConcurrentMap[K, V] {
   
   @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
     val r = RDCSS_READ_ROOT()
-    if (RDCSS_ROOT(r, r.GCAS_READ(this), r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this), rootupdater)
+    val expmain = r.GCAS_READ(this)
+    if (RDCSS_ROOT(r, expmain, r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this), rootupdater)
     else snapshot()
   }
   
   @tailrec final def readOnlySnapshot(): Map[K, V] = {
     val r = RDCSS_READ_ROOT()
-    if (RDCSS_ROOT(r, r.GCAS_READ(this), r.copy(new Gen, this))) new ConcurrentTrie(r, null)
+    val expmain = r.GCAS_READ(this)
+    if (RDCSS_ROOT(r, expmain, r.copy(new Gen, this))) new ConcurrentTrie(r, null)
     else readOnlySnapshot()
   }
   
@@ -824,7 +883,30 @@ class CtrieIterator[K, V](ct: ConcurrentTrie[K, V], mustInit: Boolean = true) ex
 object RestartException extends util.control.ControlThrowable
 
 
+final class Gen {
+  // debugging
+  val generation = Gen.counter.getAndIncrement()
+}
 
+
+object Gen {
+  val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+}
+
+
+trait DebuggingSupport {
+  import collection._
+  
+  lazy val logbuffer = new java.util.concurrent.ConcurrentLinkedQueue[AnyRef]
+  
+  def log(s: AnyRef) = logbuffer.add(s)
+  
+  def flush() {
+    for (s <- JavaConversions.asScalaIterator(logbuffer.iterator())) Console.out.println(s.toString)
+    logbuffer.clear()
+  }
+  
+}
 
 
 

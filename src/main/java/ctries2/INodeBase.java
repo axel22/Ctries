@@ -14,7 +14,7 @@ public abstract class INodeBase<K, V> extends BasicNode {
     
     public volatile MainNode<K, V> mainnode = null;
     
-    public Gen gen;
+    public final Gen gen;
     
     public INodeBase(Gen generation) {
 	gen = generation;
