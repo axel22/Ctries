@@ -38,7 +38,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
     val result =
       if (prevval eq null) m
       else GCAS_Complete(m, ct)
-    if (shouldlog) ct.log((Thread.currentThread.getName, "GCAS_READ", this.gen.generation, result, this))
+    if (shouldlog) Debug.log((Thread.currentThread.getName, "GCAS_READ", this.gen.generation, result, this))
     result
   }
   
@@ -51,7 +51,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
       case null =>
         m
       case fn: FailedNode[_, _] => // try to commit to previous value
-        //ct.log(Thread.currentThread.getName + ": found failed node - " + fn)
+        //Debug.log(Thread.currentThread.getName + ": found failed node - " + fn)
         if (CAS(m, fn.prev)) fn.prev
         else GCAS_Complete(/*READ*/mainnode, ct)
       case vn: MainNode[_, _] =>
@@ -91,7 +91,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
     if (CAS(old, n)) {
       GCAS_Complete(n, ct)
       val ok = /*READ*/n.prev eq null
-      if (ok) ct.log((Thread.currentThread.getName, "GCAS-" + cause, this.gen.generation, old, n, this))
+      if (ok) Debug.log((Thread.currentThread.getName, "GCAS-" + cause, this.gen.generation, old, n, this))
       ok
     } else false
   }
@@ -103,7 +103,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
   }
   
   /*
-  @inline final def copy(ngen: Gen, ct: ConcurrentTrie[K, V]) = {
+  @inline final def copyToGen(ngen: Gen, ct: ConcurrentTrie[K, V]) = {
     val nin = new INode[K, V](ngen)
     val main = GCAS_READ(ct, true)
     nin.WRITE(main)
@@ -112,7 +112,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
   */
   
   // debugging
-  @inline final def copy(ngen: Gen, ct: ConcurrentTrie[K, V], shouldlog: Boolean = false) = {
+  @inline final def copyToGen(ngen: Gen, ct: ConcurrentTrie[K, V], shouldlog: Boolean = false): INode[K, V] = {
     val nin = new INode[K, V](ngen)
     val main = GCAS_READ(ct, shouldlog)
     nin.WRITE(main)
@@ -135,20 +135,23 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
             case in: INode[K, V] =>
               if (startgen eq in.gen) in.rec_insert(k, v, hc, lev + 5, this, startgen, ct)
               else {
-                if (GCAS(cn, cn.renewed(startgen, ct), ct, '!')) rec_insert(k, v, hc, lev, parent, startgen, ct)
-                else false
+                val rn = cn.renewed(startgen, ct, this, in)
+                if (GCAS(cn, rn, ct, '!')) {
+                  Debug.log((Thread.currentThread, "successful renewal", cn, rn))
+                  rec_insert(k, v, hc, lev, parent, startgen, ct)
+                } else false
               }
             case sn: SNode[K, V] =>
-              if (sn.hc == hc && sn.k == k) GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc)), ct)
-              else GCAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc), hc, lev + 5, gen))), ct)
+              if (sn.hc == hc && sn.k == k) GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc), gen), ct)
+              else {
+                val rn = if (cn.gen eq gen) cn else cn.renewed(gen, ct)
+                val nn = rn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc), hc, lev + 5, gen)), gen)
+                GCAS(cn, nn, ct)
+              }
           }
         } else {
-          val len = cn.array.length
-          val narr = new Array[BasicNode](len + 1)
-          val ncnode = new CNode[K, V](bmp | flag, narr)
-          Array.copy(cn.array, 0, narr, 0, pos)
-          narr(pos) = new SNode(k, v, hc)
-          Array.copy(cn.array, pos, narr, pos + 1, len - pos)
+          val rn = if (cn.gen eq gen) cn else cn.renewed(gen, ct)
+          val ncnode = rn.insertedAt(pos, flag, new SNode(k, v, hc), gen)
           GCAS(cn, ncnode, ct)
         }
       case tn: TNode[K, V] =>
@@ -182,20 +185,20 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
             case sn: SNode[K, V] => cond match {
               case null =>
                 if (sn.hc == hc && sn.k == k) {
-                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc)), ct)) Some(sn.v) else null
+                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc), gen), ct)) Some(sn.v) else null
                 } else
-                  if (GCAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc), hc, lev + 5, gen))), ct)) None else null
+                  if (GCAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc), hc, lev + 5, gen)), gen), ct)) None else null
               case INode.KEY_ABSENT =>
                 if (sn.hc == hc && sn.k == k) Some(sn.v)
                 else
-                  if (GCAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc), hc, lev + 5, gen))), ct)) None else null
+                  if (GCAS(cn, cn.updatedAt(pos, inode(CNode.dual(sn, sn.hc, new SNode(k, v, hc), hc, lev + 5, gen)), gen), ct)) None else null
               case INode.KEY_PRESENT =>
                 if (sn.hc == hc && sn.k == k) {
-                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc)), ct)) Some(sn.v) else null
+                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc), gen), ct)) Some(sn.v) else null
                 } else None
               case otherv: V =>
                 if (sn.hc == hc && sn.k == k && sn.v == otherv) {
-                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc)), ct)) Some(sn.v) else null
+                  if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc), gen), ct)) Some(sn.v) else null
                 } else None
             }
           }
@@ -203,10 +206,10 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
           case null | INode.KEY_ABSENT =>
             val len = cn.array.length
             val narr = new Array[BasicNode](len + 1)
-            val ncnode = new CNode[K, V](bmp | flag, narr)
             Array.copy(cn.array, 0, narr, 0, pos)
             narr(pos) = new SNode(k, v, hc)
             Array.copy(cn.array, pos, narr, pos + 1, len - pos)
+            val ncnode = new CNode[K, V](bmp | flag, narr, gen)
             if (GCAS(cn, ncnode, ct)) None else null
           case INode.KEY_PRESENT => None
           case otherv: V => None
@@ -301,7 +304,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
               }
             case sn: SNode[K, V] =>
               if (sn.hc == hc && sn.k == k && (v == null || sn.v == v)) {
-                val ncn = cn.removedAt(pos, flag).toContracted(lev)
+                val ncn = cn.removedAt(pos, flag, gen).toContracted(lev)
                 if (GCAS(cn, ncn, ct)) Some(sn.v) else null
               } else None
           }
@@ -321,7 +324,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
                     val sub = cn.array(pos)
                     if (sub eq this) nonlive match {
                       case tn: TNode[K, V] =>
-                        val ncn = cn.updatedAt(pos, tn.copyUntombed).toContracted(lev - 5)
+                        val ncn = cn.updatedAt(pos, tn.copyUntombed, gen).toContracted(lev - 5)
                         if (!parent.GCAS(cn, ncn, ct))
                           if (ct.RDCSS_READ_ROOT().gen == startgen) cleanParent(nonlive)
                     }
@@ -359,7 +362,7 @@ final class INode[K, V](bn: MainNode[K, V], g: Gen) extends INodeBase[K, V](g) {
   private def clean(nd: INode[K, V], ct: ConcurrentTrie[K, V], lev: Int) {
     val m = nd.GCAS_READ(ct)
     m match {
-      case cn: CNode[K, V] => nd.GCAS(cn, cn.toCompressed(ct, lev), ct)
+      case cn: CNode[K, V] => nd.GCAS(cn, cn.toCompressed(ct, lev, gen), ct)
       case _ =>
     }
   }
@@ -383,8 +386,9 @@ object INode {
   val KEY_ABSENT = new AnyRef
   
   def newRootNode[K, V] = {
-    val cn = new CNode[K, V](0, new Array(0))
-    new INode[K, V](cn, new Gen)
+    val gen = new Gen
+    val cn = new CNode[K, V](0, new Array(0), gen)
+    new INode[K, V](cn, gen)
   }
 }
 
@@ -441,43 +445,80 @@ extends MainNode[K, V] {
 }
 
 
-final class CNode[K, V](final val bitmap: Int, final val array: Array[BasicNode])
+final class CNode[K, V](final val bitmap: Int, final val array: Array[BasicNode], final val gen: Gen)
 extends MainNode[K, V] {
   
-  final def updatedAt(pos: Int, nn: BasicNode) = {
+  private def firstinode = array.find {
+    case in: INode[K, V] => true
+    case _ => false
+  } map (_.asInstanceOf[INode[K, V]])
+  
+  if (firstinode != None) {
+    val a = array collect {
+      case in: INode[K, V] if firstinode.get.gen.generation != in.gen.generation => in
+    }
+    if (a.nonEmpty) {
+      Debug.log(("!!!!!!!!!!!!!!!!!!", Thread.currentThread.getName, firstinode.get.gen.generation, a.toList map (_.gen.generation), this))
+      assert(false, this)
+    }
+  }
+  
+  assert(isAtGen(gen))
+  
+  final def isAtGen(gen: Gen) = array forall {
+    case in: INode[K, V] => in.gen eq gen
+    case _ => true
+  }
+  
+  final def updatedAt(pos: Int, nn: BasicNode, gen: Gen) = {
     val len = array.length
     val narr = new Array[BasicNode](len)
     Array.copy(array, 0, narr, 0, len)
+    //if (nn.isInstanceOf[INode[K, V]]) Debug.log((Thread.currentThread.getName, "updatedAt", pos, nn.asInstanceOf[INode[K, V]].gen.generation))
     narr(pos) = nn
-    new CNode[K, V](bitmap, narr)
+    new CNode[K, V](bitmap, narr, gen)
   }
   
-  final def removedAt(pos: Int, flag: Int) = {
+  final def removedAt(pos: Int, flag: Int, gen: Gen) = {
     val arr = array
     val len = arr.length
     val narr = new Array[BasicNode](len - 1)
     Array.copy(arr, 0, narr, 0, pos)
     Array.copy(arr, pos + 1, narr, pos, len - pos - 1)
-    new CNode[K, V](bitmap ^ flag, narr)
+    new CNode[K, V](bitmap ^ flag, narr, gen)
+  }
+  
+  final def insertedAt(pos: Int, flag: Int, nn: BasicNode, gen: Gen) = {
+    val len = array.length
+    val bmp = bitmap
+    val narr = new Array[BasicNode](len + 1)
+    Array.copy(array, 0, narr, 0, pos)
+    narr(pos) = nn
+    Array.copy(array, pos, narr, pos + 1, len - pos)
+    new CNode[K, V](bmp | flag, narr, gen)
   }
   
   /** Returns a copy of this cnode such that all the i-nodes below it are copied
    *  to the specified generation `ngen`.
    */
-  final def renewed(ngen: Gen, ct: ConcurrentTrie[K, V]) = {
-    ct.log((Thread.currentThread.getName, "attempting renewal to ngen: " + ngen.generation))
+  final def renewed(ngen: Gen, ct: ConcurrentTrie[K, V], thiz: INode[K, V] = null, in: INode[K, V] = null) = {
+    if (thiz != null) Debug.log((Thread.currentThread.getName, "attempting renewal of " + thiz + " at gen " + thiz.gen.generation, "; at " + ngen.generation))
     var i = 0
     val arr = array
     val len = arr.length
     val narr = new Array[BasicNode](len)
     while (i < len) {
       arr(i) match {
-        case in: INode[K, V] => narr(i) = in.copy(ngen, ct, true)
+        case in: INode[K, V] => narr(i) = in.copyToGen(ngen, ct, true)
         case bn: BasicNode => narr(i) = bn
       }
       i += 1
     }
-    new CNode[K, V](bitmap, narr)
+    assert(narr.forall {
+      case in: INode[K, V] => in.gen.generation == ngen.generation
+      case _ => true
+    })
+    new CNode[K, V](bitmap, narr, ngen)
   }
   
   private def resurrect(inode: INode[K, V], inodemain: AnyRef) = inodemain match {
@@ -496,7 +537,7 @@ extends MainNode[K, V] {
   //   returns the version of this node with at least some null-inodes
   //   removed (those existing when the op began)
   // - if there are only null-i-nodes below, returns null
-  final def toCompressed(ct: ConcurrentTrie[K, V], lev: Int) = {
+  final def toCompressed(ct: ConcurrentTrie[K, V], lev: Int, gen: Gen) = {
     var bmp = bitmap
     var i = 0
     val arr = array
@@ -514,7 +555,7 @@ extends MainNode[K, V] {
       i += 1
     }
     
-    new CNode[K, V](bmp, tmparray).toContracted(lev)
+    new CNode[K, V](bmp, tmparray, gen).toContracted(lev)
   }
   
   private[ctries2] def string(lev: Int): String = "CNode %x\n%s".format(bitmap, array.map(_.string(lev + 1)).mkString("\n"))
@@ -531,7 +572,7 @@ extends MainNode[K, V] {
   
   protected def collectLocalElems: Seq[String] = array flatMap {
     case sn: SNode[K, V] => Some(sn.kvPair._2.toString)
-    case in: INode[K, V] => Some(in.toString.drop(14))
+    case in: INode[K, V] => Some(in.toString.drop(14) + "(" + in.gen.generation + ")")
   }
   
   override def toString = {
@@ -547,7 +588,8 @@ object CNode {
     val flag = 1 << ((hc >>> lev) & 0x1f)
     val arr = new Array[BasicNode](1)
     arr(0) = sn
-    new CNode(flag, arr)
+    //new CNode(flag, arr)
+    throw new UnsupportedOperationException
   }
   
   def dual[K, V](x: SNode[K, V], xhc: Int, y: SNode[K, V], yhc: Int, lev: Int, gen: Gen): MainNode[K, V] = if (lev < 35) {
@@ -557,10 +599,10 @@ object CNode {
     if (xidx == yidx) {
       val subinode = new INode[K, V](gen)//(ConcurrentTrie.inodeupdater)
       subinode.mainnode = dual(x, xhc, y, yhc, lev + 5, gen)
-      new CNode(bmp, Array(subinode))
+      new CNode(bmp, Array(subinode), gen)
     } else {
-      if (xidx < yidx) new CNode(bmp, Array(x, y))
-      else new CNode(bmp, Array(y, x))
+      if (xidx < yidx) new CNode(bmp, Array(x, y), gen)
+      else new CNode(bmp, Array(y, x), gen)
     }
   } else {
     new LNode(x.k, x.v, y.k, y.v)
@@ -575,7 +617,6 @@ case class RDCSS_Descriptor[K, V](old: INode[K, V], expectedmain: MainNode[K, V]
 
 class ConcurrentTrie[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater[ConcurrentTrie[K, V], AnyRef])
 extends ConcurrentMap[K, V]
-with DebuggingSupport
 {
   private val rootupdater = rtupd
   @volatile var root = r
@@ -684,14 +725,14 @@ with DebuggingSupport
   @tailrec final def snapshot(): ConcurrentTrie[K, V] = {
     val r = RDCSS_READ_ROOT()
     val expmain = r.GCAS_READ(this)
-    if (RDCSS_ROOT(r, expmain, r.copy(new Gen, this))) new ConcurrentTrie(r.copy(new Gen, this), rootupdater)
+    if (RDCSS_ROOT(r, expmain, r.copyToGen(new Gen, this))) new ConcurrentTrie(r.copyToGen(new Gen, this), rootupdater)
     else snapshot()
   }
   
   @tailrec final def readOnlySnapshot(): Map[K, V] = {
     val r = RDCSS_READ_ROOT()
     val expmain = r.GCAS_READ(this)
-    if (RDCSS_ROOT(r, expmain, r.copy(new Gen, this))) new ConcurrentTrie(r, null)
+    if (RDCSS_ROOT(r, expmain, r.copyToGen(new Gen, this))) new ConcurrentTrie(r, null)
     else readOnlySnapshot()
   }
   
@@ -894,7 +935,7 @@ object Gen {
 }
 
 
-trait DebuggingSupport {
+object Debug {
   import collection._
   
   lazy val logbuffer = new java.util.concurrent.ConcurrentLinkedQueue[AnyRef]
@@ -903,6 +944,10 @@ trait DebuggingSupport {
   
   def flush() {
     for (s <- JavaConversions.asScalaIterator(logbuffer.iterator())) Console.out.println(s.toString)
+    logbuffer.clear()
+  }
+  
+  def clear() {
     logbuffer.clear()
   }
   
