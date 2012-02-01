@@ -137,7 +137,6 @@ object CtrieChecks extends Properties("Ctrie") {
     ok
   }
   
-  /*
   property("update") = forAll(sizes) {
     (n: Int) =>
     val ct = new ConcurrentTrie[Int, Int]
@@ -192,7 +191,6 @@ object CtrieChecks extends Properties("Ctrie") {
       case i => ct.get(Wrap(i)) == Some(i)
     })
   }
-  */
   
 }
 
