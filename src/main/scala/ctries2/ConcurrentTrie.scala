@@ -419,7 +419,7 @@ extends MainNode[K, V] {
     if (updmap.size > 1) new LNode(updmap)
     else {
       val (k, v) = updmap.iterator.next
-      new TNode(k, v, k.hashCode) // create it tombed so that it gets compressed on subsequent accesses
+      new TNode(k, v, ConcurrentTrie.computeHash(k)) // create it tombed so that it gets compressed on subsequent accesses
     }
   }
   def get(k: K) = listmap.get(k)
@@ -565,6 +565,8 @@ case class RDCSS_Descriptor[K, V](old: INode[K, V], expectedmain: MainNode[K, V]
 class ConcurrentTrie[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater[ConcurrentTrie[K, V], AnyRef])
 extends ConcurrentMap[K, V]
 {
+  import ConcurrentTrie.computeHash
+  
   private val rootupdater = rtupd
   @volatile var root = r
   
@@ -615,10 +617,6 @@ extends ConcurrentMap[K, V]
       RDCSS_Complete(false)
       /*READ*/desc.committed
     } else false
-  }
-  
-  @inline private def computeHash(k: K): Int = {
-    k.hashCode
   }
   
   @tailrec private def inserthc(k: K, hc: Int, v: V) {
@@ -758,7 +756,11 @@ extends ConcurrentMap[K, V]
 
 
 object ConcurrentTrie {
-  val inodeupdater = AtomicReferenceFieldUpdater.newUpdater(classOf[INodeBase[_, _]], classOf[AnyRef], "mainnode")
+  val inodeupdater = AtomicReferenceFieldUpdater.newUpdater(classOf[INodeBase[_, _]], classOf[MainNode[_, _]], "mainnode")
+  
+  @inline final def computeHash[K](k: K): Int = {
+    k.hashCode
+  }
 }
 
 
