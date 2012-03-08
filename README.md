@@ -71,3 +71,4 @@ This specific benchmark will evenly distribute the work of inserting `sz` elemen
 
 It's also possible to run benchmarks in batches to produce a range of results using the `bench-batch` task in the SBT shell. This will run a Perl script to gather the data and convert them to Latex tikz format used for figures.
 
+All benchmarks presented in the paper are available within this project.
