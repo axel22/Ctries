@@ -4,6 +4,8 @@ A concurrent hash-trie or Ctrie is a concurrent thread-safe lock-free implementa
 
 The implementation is written in Scala (http://www.scala-lang.org/), a statically compiled language for the JVM. It is fully compliant with the collection package from the Scala standard library.
 
+As the Ctrie is a part of the Scala standard library since the version 2.10, clients using versions 2.9.x can use this implementation.
+
 More info about Ctries:
 
 - http://infoscience.epfl.ch/record/166908/files/ctries-techreport.pdf - this is a nice introduction to Ctries, along with a correctness proof
