@@ -1,3 +1,0 @@
-#!/bin/bash
-TASK="bench-batch --gnuplot=$1-iter -Dsz=$3 -Dpar=$2 ctries.IterationCtrie2 ctries.IterationSkipList ctries.IterationCHM ctries.IterationHashTrie ctries.IterationHashTable"
-sbt "$TASK"

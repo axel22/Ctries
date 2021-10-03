@@ -1,3 +1,0 @@
-#!/bin/bash
-TASK="bench-batch --gnuplot=$1-pagerank -Dsz=${11} -Dpar=$2 -Dpagegenerator=$8 -Dmaxlinks=$9 -Ddamping=${10} -Ddebug=false ctries.ParPageRank ctries.FilterPageRank"
-sbt "$TASK"

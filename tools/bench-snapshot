@@ -1,3 +1,0 @@
-#!/bin/bash
-TASK="bench-batch --gnuplot=$1-snapshot -Dsz=$3 -Dpar=$2 ctries.MultiRemovingCtrie2 ctries.MultiRemovingCtrie2Snapshot"
-sbt "$TASK"
